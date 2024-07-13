@@ -1,0 +1,17 @@
+{
+    "rust-analyzer.showUnlinkedFileNotification": false,
+    "cargo.automaticCheck": true,
+    "rust-analyzer.check.features": [
+        "ssr",
+        "axum",
+    ],
+    "rust-analyzer.cargo.features": [
+        
+        "ssr",
+        "axum",
+    ],
+    "terminal.integrated.shell.linux": "/bin/bash",
+    "terminal.integrated.shellArgs.linux": [
+    "-i"
+    ],
+}
