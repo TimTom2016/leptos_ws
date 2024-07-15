@@ -1,0 +1,10 @@
+"filename", "language", "TOML", "Rust", "comment", "blank", "total"
+"/home/tim/Dokumente/Projects/leptos_ws/Cargo.lock", "TOML", 2324, 0, 2, 260, 2586
+"/home/tim/Dokumente/Projects/leptos_ws/Cargo.toml", "TOML", 24, 0, 2, 10, 36
+"/home/tim/Dokumente/Projects/leptos_ws/src/axum.rs", "Rust", 0, 39, 0, 11, 50
+"/home/tim/Dokumente/Projects/leptos_ws/src/error.rs", "Rust", 0, 12, 0, 2, 14
+"/home/tim/Dokumente/Projects/leptos_ws/src/lib.rs", "Rust", 0, 180, 15, 26, 221
+"/home/tim/Dokumente/Projects/leptos_ws/src/messages.rs", "Rust", 0, 7, 0, 3, 10
+"/home/tim/Dokumente/Projects/leptos_ws/src/server_signal.rs", "Rust", 0, 88, 126, 33, 247
+"/home/tim/Dokumente/Projects/leptos_ws/src/server_signals.rs", "Rust", 0, 72, 2, 4, 78
+"Total", "-", 2348, 398, 147, 349, 3242

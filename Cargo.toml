@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 json-patch = "2.0.0"
-leptos = { version = "0.6", default-features = false }
+leptos = { version = "=0.7.0-alpha", default-features = false }
 
 uuid = {version="1", default_features=false}
 
@@ -26,9 +26,11 @@ web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent"] }
 
 tokio = { version = "1.38.0", optional = true,features = ["rt-multi-thread"]}
 
+[dev-dependencies]
+any_spawner = {version="*",features=["tokio"]}
 
 [features]
 default = []
-ssr = ["leptos/ssr","dep:tokio"]
-actix = ["dep:actix-ws", "dep:thiserror"]
-axum = ["dep:axum", "dep:futures", "dep:thiserror"]
+ssr = ["leptos/ssr","dep:tokio","dep:futures","dep:thiserror"]
+actix = ["dep:actix-ws"]
+axum = ["dep:axum"]
