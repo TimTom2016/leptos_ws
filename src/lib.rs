@@ -170,7 +170,7 @@ mod test {
     use web_sys::js_sys::Math::sign;
 
     use crate::{
-        error, server_signal::ServerSignal, server_signals::{self, ServerSignals}, History
+        error, server_signal::{ServerSignal, ServerSignalTrait}, server_signals::{self, ServerSignals}, History
     };
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -183,24 +183,37 @@ mod test {
         provide_context(server_signals.clone());
         use_context::<ServerSignals>().unwrap();
         let signal = ServerSignal::new(history.clone(),History(vec![1.0, 2.0, 3.0, 4.0]))
-            .await
             .unwrap();
         let text = RwSignal::new("".to_string());
         let signal2 = signal.clone();
-        spawn(async move {
-            Effect::new_isomorphic({
-                let signal = signal.clone();
-                move |_| {
-                    let vector = signal.with(|values| values.0.iter().last().unwrap().clone());
-                    println!("{}", format!("{}", vector));
-                }
-            });
-        });
         signal2.update(|values| values.0.push(5.0));
-        Executor::tick().await;
         signal2.update(|values| values.0.push(5.0 + 1 as f64));
-        Executor::tick().await;
         signal2.update(|values| values.0.push(5.0 + 2 as f64));
-        Executor::tick().await;
+    }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub async fn observer_test() {
+        let history = "History".to_string();
+        _ = Executor::init_tokio();
+        let _owner = Owner::new();
+        _owner.set();
+        let server_signals = ServerSignals::new();
+        provide_context(server_signals.clone());
+        use_context::<ServerSignals>().unwrap();
+        let signal = ServerSignal::new(history.clone(),History(vec![1.0, 2.0, 3.0, 4.0]))
+            .unwrap();
+        let mut observer = signal.add_observer().await;
+        spawn(
+            async move {
+                while let value = observer.recv().await {
+                    println!("{:?}",value);
+                }
+            }
+        );
+        let signal2 = signal.clone();
+        signal2.update(|values| values.0.push(5.0));
+        signal2.update(|values| values.0.push(5.0 + 1 as f64));
+        signal2.update(|values| values.0.push(5.0 + 2 as f64));
+        
+        
     }
 }

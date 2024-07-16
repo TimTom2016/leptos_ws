@@ -25,8 +25,9 @@ pub async fn websocket(ws: axum::extract::WebSocketUpgrade,State(server_signals)
 async fn handle_socket(mut socket: axum::extract::ws::WebSocket,server_signals: ServerSignals) {
     let (mut send,mut recv) = socket.split();
     let (websocket_sender,websocket_receiver) = channel(10);
+    let server_signals2 = server_signals.clone();
     spawn(async move {
-        let server_signals = expect_context::<ServerSignals>();
+        
         while let Some(message) = recv.next().await {
             if let Ok(msg) = message {
                 match msg {
@@ -34,7 +35,7 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket,server_signals: 
                         let message: Messages = serde_json::from_str(&text).unwrap();
                         match message {
                             Messages::Establish(name) => {
-                                let mut recv = server_signals.add_subscriber(name.clone()).await.unwrap();
+                                let mut recv = server_signals.add_observer(name.clone()).await.unwrap();
                                spawn(handle_broadcasts(recv, websocket_sender.clone()));
 
                             },
