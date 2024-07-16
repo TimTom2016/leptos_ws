@@ -7,7 +7,7 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
-use crate::{error::Error, server_signal::ServerSignalTrait, ServerSignalUpdate};
+use crate::{error::Error, server_signal::ServerSignalTrait, messages::ServerSignalUpdate};
 use futures::executor::block_on;
 use json_patch::Patch;
 use leptos::prelude::*;

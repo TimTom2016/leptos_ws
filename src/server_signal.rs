@@ -8,7 +8,7 @@ use std::{any::TypeId, borrow::Cow};
 
 use crate::error::Error;
 use crate::server_signals::ServerSignals;
-use crate::ServerSignalUpdate;
+use crate::messages::ServerSignalUpdate;
 use axum::async_trait;
 use futures::executor::block_on;
 use futures::sink::{Sink, SinkExt};

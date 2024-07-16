@@ -4,7 +4,7 @@ use axum::{async_trait, extract::{ws::Message, State}};
 use futures::{future::BoxFuture, stream::{select_all, SplitSink}, Future, SinkExt, StreamExt};
 use leptos::reactive_graph::{effect::Effect, owner::expect_context};
 use tokio::{spawn, sync::{broadcast::{channel, error::RecvError, Receiver, Sender}, Mutex, RwLock}, task::JoinSet};
-use crate::{messages::Messages, server_signals::{self, ServerSignals}, ServerSignalUpdate};
+use crate::{messages::Messages, server_signals::{self, ServerSignals}, messages::ServerSignalUpdate};
 
 pub async fn handle_broadcasts(mut receiver: Receiver<ServerSignalUpdate>, sink: Sender<Message>) {
     while let Ok(message) = receiver.recv().await {
