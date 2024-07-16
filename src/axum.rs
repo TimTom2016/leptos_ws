@@ -14,10 +14,6 @@ pub async fn handle_broadcasts(mut receiver: Receiver<ServerSignalUpdate>, sink:
     }
 }
 
-
-
-
-
 pub async fn websocket(ws: axum::extract::WebSocketUpgrade,State(server_signals): State<ServerSignals>) -> axum::response::Response {
     ws.on_upgrade(move |socket| handle_socket(socket,server_signals))
 }

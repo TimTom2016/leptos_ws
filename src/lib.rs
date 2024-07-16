@@ -11,6 +11,7 @@ use web_sys::WebSocket;
 
 pub mod messages;
 pub mod error;
+#[cfg(feature="ssr")]
 pub mod server_signal;
 
 #[cfg(feature = "ssr")]
@@ -190,6 +191,7 @@ mod test {
         signal2.update(|values| values.0.push(5.0 + 1 as f64));
         signal2.update(|values| values.0.push(5.0 + 2 as f64));
     }
+    
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub async fn observer_test() {
         let history = "History".to_string();
