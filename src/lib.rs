@@ -202,17 +202,16 @@ mod test {
         let signal = ServerSignal::new(history.clone(),History(vec![1.0, 2.0, 3.0, 4.0]))
             .unwrap();
         let mut observer = signal.add_observer().await;
-        spawn(
-            async move {
-                while let value = observer.recv().await {
-                    println!("{:?}",value);
-                }
-            }
-        );
         let signal2 = signal.clone();
         signal2.update(|values| values.0.push(5.0));
+        Executor::tick().await;
+        println!("{:?}",observer.recv().await);
         signal2.update(|values| values.0.push(5.0 + 1 as f64));
+        Executor::tick().await;
+        println!("{:?}",observer.recv().await);
         signal2.update(|values| values.0.push(5.0 + 2 as f64));
+        Executor::tick().await;
+        println!("{:?}",observer.recv().await);
         
         
     }
