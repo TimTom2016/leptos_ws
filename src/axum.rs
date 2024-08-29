@@ -14,6 +14,7 @@ use futures::{
     stream::{select_all, SplitSink},
     Future, SinkExt, StreamExt,
 };
+use leptos::logging::error;
 use leptos::{
     prelude::warn,
     reactive_graph::{effect::Effect, owner::expect_context},
