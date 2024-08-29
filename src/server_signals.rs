@@ -1,3 +1,7 @@
+use crate::{error::Error, messages::ServerSignalUpdate, server_signal::ServerSignalTrait};
+use futures::executor::block_on;
+use json_patch::Patch;
+use leptos::prelude::*;
 use std::{
     any::{Any, TypeId},
     borrow::{Borrow, Cow},
@@ -7,10 +11,6 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
-use crate::{error::Error, server_signal::ServerSignalTrait, messages::ServerSignalUpdate};
-use futures::executor::block_on;
-use json_patch::Patch;
-use leptos::prelude::*;
 use tokio::sync::{broadcast::Receiver, RwLock};
 
 #[derive(Clone)]
@@ -24,10 +24,7 @@ impl ServerSignals {
         let count = ArcRwSignal::new(0);
         let count2 = count.clone();
         let signals = Arc::new(RwLock::new(HashMap::new()));
-        let me = Self {
-            signals,
-            count
-        };
+        let me = Self { signals, count };
         me.setup_effect();
         me
     }
@@ -37,34 +34,26 @@ impl ServerSignals {
         let signals = self.signals.clone();
         Effect::new_isomorphic(move |_| {
             count.track();
-            
-            for signal in block_on(signals.read())
-                .iter()
-            {
+
+            for signal in block_on(signals.read()).iter() {
                 signal.1.track();
                 // block_on(signal.1.update_if_changed());
             }
-            println!("Hello World");
-            for signal in block_on(signals.read())
-                .iter()
-            {
+            for signal in block_on(signals.read()).iter() {
                 // signal.1.update_if_changed();
                 block_on(signal.1.update_if_changed());
             }
-
-
         });
     }
-
 
     pub async fn create_signal<T: Clone + Send + Sync + 'static>(
         &mut self,
         name: String,
         value: T,
-    ) -> Result<(), Error> 
-    where 
-        T: ServerSignalTrait
-    {        
+    ) -> Result<(), Error>
+    where
+        T: ServerSignalTrait,
+    {
         if self
             .signals
             .write()
@@ -79,39 +68,44 @@ impl ServerSignals {
             Err(Error::AddingSignalFailed)
         }
     }
-    pub async fn get_signal<T: Clone + 'static>(&mut self,name: String) -> Option<T> {
+    pub async fn get_signal<T: Clone + 'static>(&mut self, name: String) -> Option<T> {
         self.signals
             .write()
             .await
             .get_mut(&name)
             .map(|value| value.as_any().downcast_ref::<T>().unwrap().clone())
     }
-    pub async fn add_observer(&self,name: String) -> Option<Receiver<ServerSignalUpdate>> {
-        match self.signals
+    pub async fn add_observer(&self, name: String) -> Option<Receiver<ServerSignalUpdate>> {
+        match self
+            .signals
             .read()
             .await
             .get(&name)
-            .map(|value| value.add_observer()) {
-                Some(fut) => Some(fut.await),
-                None => None,
-            }
+            .map(|value| value.add_observer())
+        {
+            Some(fut) => Some(fut.await),
+            None => None,
+        }
     }
-    pub async fn update(&self,name: String,patch: ServerSignalUpdate) -> Option<Result<(),Error>> {
-        match self.signals
+    pub async fn update(
+        &self,
+        name: String,
+        patch: ServerSignalUpdate,
+    ) -> Option<Result<(), Error>> {
+        match self
+            .signals
             .write()
             .await
             .get_mut(&name)
-            .map(|value| value.update_json(patch)) {
-                Some(fut) => Some(fut.await),
-                None => None,
-            }
+            .map(|value| value.update_json(patch))
+        {
+            Some(fut) => Some(fut.await),
+            None => None,
+        }
     }
     pub async fn update_changed_function(&self) -> bool {
         let mut found = false;
-        for signal in self.signals
-            .read()
-            .await
-            .iter() {
+        for signal in self.signals.read().await.iter() {
             if signal.1.update_if_changed().await.is_ok() == true {
                 found = true;
             }
@@ -120,11 +114,11 @@ impl ServerSignals {
     }
     #[track_caller]
     pub fn track_all(&self) {
-        for signal in self.signals
-            .blocking_read()
-            .iter()
-        {
+        for signal in self.signals.blocking_read().iter() {
             signal.1.track();
         }
+    }
+    pub async fn contains(&self, name: &str) -> bool {
+        self.signals.read().await.contains_key(name)
     }
 }

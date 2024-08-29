@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::{any::TypeId, borrow::Cow};
 
 use crate::error::Error;
-use crate::server_signals::ServerSignals;
 use crate::messages::ServerSignalUpdate;
+use crate::server_signals::ServerSignals;
 use axum::async_trait;
 use futures::executor::block_on;
 use futures::sink::{Sink, SinkExt};
@@ -35,13 +35,12 @@ where
     value: ArcRwSignal<T>,
     json_value: Arc<RwLock<Value>>,
     observers: Arc<Sender<ServerSignalUpdate>>,
-    changed: Arc<RwLock<bool>>,
 }
 #[async_trait]
 pub trait ServerSignalTrait {
     async fn add_observer(&self) -> Receiver<ServerSignalUpdate>;
-    async fn update_json(&self,patch: ServerSignalUpdate) -> Result<(),Error>;
-    async fn update_if_changed(&self) -> Result<(),Error>;
+    async fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error>;
+    async fn update_if_changed(&self) -> Result<(), Error>;
     fn as_any(&self) -> &dyn Any;
     fn track(&self);
 }
@@ -49,16 +48,16 @@ pub trait ServerSignalTrait {
 #[async_trait]
 impl<T> ServerSignalTrait for ServerSignal<T>
 where
-    T: Clone + Send + Sync + for<'de> Deserialize<'de> +'static + Serialize,
+    T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static + Serialize,
 {
     async fn add_observer(&self) -> Receiver<ServerSignalUpdate> {
         self.subscribe().await
     }
 
-    async fn update_json(&self,patch: ServerSignalUpdate) -> Result<(),Error> {
+    async fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error> {
         let mut writer = self.json_value.write().await;
         if json_patch::patch(writer.deref_mut(), &patch.patch).is_ok() {
-            *self.value.write() = serde_json::from_value(writer.clone())?;
+            //*self.value.write() = serde_json::from_value(writer.clone())?;
             self.observers.send(patch);
             Ok(())
         } else {
@@ -66,21 +65,21 @@ where
         }
     }
 
-    async fn update_if_changed(&self) -> Result<(),Error> {
-        let is_changed = self.changed.read().await.clone();
-        if is_changed == true {
-            let json = self.json_value.read().await.clone();
-            let new_json = serde_json::to_value(self.value.get())?;
-            let mut res = Err(Error::UpdateSignalFailed);
-            if json != new_json {
-                res = self.update_json(ServerSignalUpdate::new_from_json(self.name.clone(),&json, &new_json)).await;
-            }          
-            res
-        } else {
-            Err(Error::UpdateSignalFailed)
+    async fn update_if_changed(&self) -> Result<(), Error> {
+        let json = self.json_value.read().await.clone();
+        let new_json = serde_json::to_value(self.value.get())?;
+        let mut res = Err(Error::UpdateSignalFailed);
+        if json != new_json {
+            res = self
+                .update_json(ServerSignalUpdate::new_from_json(
+                    self.name.clone(),
+                    &json,
+                    &new_json,
+                ))
+                .await;
         }
+        res
     }
-
 
     fn as_any(&self) -> &dyn Any {
         self
@@ -92,69 +91,58 @@ where
     }
 }
 
-
-
-
 impl<T> ServerSignal<T>
 where
-    T:  Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
+    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
-    pub fn new(name: String,value: T) -> Result<Self, Error> {
+    pub fn new(name: String, value: T) -> Result<Self, Error> {
         let mut signals = use_context::<ServerSignals>().ok_or(Error::MissingServerSignals)?;
+        if block_on(signals.contains(&name)) {
+            return Ok(block_on(signals.get_signal::<ServerSignal<T>>(name)).unwrap());
+        }
         let (send, recv) = channel(32);
         let new_signal = ServerSignal {
             name: name.clone(),
             value: ArcRwSignal::new(value.clone()),
             json_value: Arc::new(RwLock::new(serde_json::to_value(value)?)),
             observers: Arc::new(send),
-            changed: Arc::new(RwLock::new(false))
         };
         let signal = new_signal.clone();
-        block_on(signals.create_signal(name,new_signal)).unwrap();
+        block_on(signals.create_signal(name, new_signal)).unwrap();
         Ok(signal)
     }
 
     pub async fn subscribe(&self) -> Receiver<ServerSignalUpdate> {
         self.observers.subscribe()
     }
-
-    
-
 }
 
 impl<T> Update for ServerSignal<T>
 where
-    T:  Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
+    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
-    type Value=T;
-    
-    fn try_maybe_update<U>(
-        &self,
-        fun: impl FnOnce(&mut Self::Value) -> (bool, U),
-    ) -> Option<U> {
+    type Value = T;
+
+    fn try_maybe_update<U>(&self, fun: impl FnOnce(&mut Self::Value) -> (bool, U)) -> Option<U> {
         let mut lock = self.value.try_write()?;
         let (did_update, val) = fun(&mut *lock);
         if !did_update {
             lock.untrack();
         } else {
-            block_on(
-                async move {
-                    *self.changed.write().await = true;
-                }
-            );
         }
         drop(lock);
+        block_on(async move {
+            self.update_if_changed().await;
+        });
         Some(val)
     }
 }
 
-
-
 impl<T> Deref for ServerSignal<T>
 where
-    T:  Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
+    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
-    type Target=ArcRwSignal<T>;
+    type Target = ArcRwSignal<T>;
 
     fn deref(&self) -> &Self::Target {
         &self.value
