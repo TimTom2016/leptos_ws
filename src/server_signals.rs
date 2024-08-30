@@ -2,6 +2,7 @@ use crate::{error::Error, messages::ServerSignalUpdate, server_signal::ServerSig
 use futures::executor::block_on;
 use json_patch::Patch;
 use leptos::prelude::*;
+use serde_json::Value;
 use std::{
     any::{Any, TypeId},
     borrow::{Borrow, Cow},
@@ -16,34 +17,13 @@ use tokio::sync::{broadcast::Receiver, RwLock};
 #[derive(Clone)]
 pub struct ServerSignals {
     signals: Arc<RwLock<HashMap<String, Arc<Box<dyn ServerSignalTrait + Send + Sync>>>>>,
-    count: ArcRwSignal<u16>,
 }
 
 impl ServerSignals {
     pub fn new() -> Self {
-        let count = ArcRwSignal::new(0);
-        let count2 = count.clone();
         let signals = Arc::new(RwLock::new(HashMap::new()));
-        let me = Self { signals, count };
-        me.setup_effect();
+        let me = Self { signals };
         me
-    }
-
-    pub fn setup_effect(&self) {
-        let count = self.count.clone();
-        let signals = self.signals.clone();
-        Effect::new_isomorphic(move |_| {
-            count.track();
-
-            for signal in block_on(signals.read()).iter() {
-                signal.1.track();
-                // block_on(signal.1.update_if_changed());
-            }
-            for signal in block_on(signals.read()).iter() {
-                // signal.1.update_if_changed();
-                block_on(signal.1.update_if_changed());
-            }
-        });
     }
 
     pub async fn create_signal<T: Clone + Send + Sync + 'static>(
@@ -62,7 +42,6 @@ impl ServerSignals {
             .map(|value| value.as_any().downcast_ref::<T>().unwrap().clone())
             .is_none()
         {
-            self.count.update(|value| *value += 1);
             Ok(())
         } else {
             Err(Error::AddingSignalFailed)
@@ -87,6 +66,19 @@ impl ServerSignals {
             None => None,
         }
     }
+
+    pub async fn json(&self, name: String) -> Option<Result<Value, Error>> {
+        match self
+            .signals
+            .read()
+            .await
+            .get(&name)
+            .map(|value| value.json())
+        {
+            Some(res) => Some(res),
+            None => None,
+        }
+    }
     pub async fn update(
         &self,
         name: String,
@@ -103,21 +95,7 @@ impl ServerSignals {
             None => None,
         }
     }
-    pub async fn update_changed_function(&self) -> bool {
-        let mut found = false;
-        for signal in self.signals.read().await.iter() {
-            if signal.1.update_if_changed().await.is_ok() == true {
-                found = true;
-            }
-        }
-        found
-    }
-    #[track_caller]
-    pub fn track_all(&self) {
-        for signal in self.signals.blocking_read().iter() {
-            signal.1.track();
-        }
-    }
+
     pub async fn contains(&self, name: &str) -> bool {
         self.signals.read().await.contains_key(name)
     }

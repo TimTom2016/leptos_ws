@@ -68,9 +68,27 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, server_signals:
                             Messages::Establish(name) => {
                                 let mut recv =
                                     server_signals.add_observer(name.clone()).await.unwrap();
+                                send.clone()
+                                    .write()
+                                    .await
+                                    .send(Message::Text(
+                                        serde_json::to_string(&Messages::EstablishResponse((
+                                            name.clone(),
+                                            server_signals
+                                                .json(name.clone())
+                                                .await
+                                                .unwrap()
+                                                .unwrap(),
+                                        )))
+                                        .unwrap(),
+                                    ))
+                                    .await;
                                 spawn(handle_broadcasts(recv, send.clone()));
                             }
                             Messages::Update(update) => {
+                                error!("You can't change the server signal from the client side")
+                            }
+                            Messages::EstablishResponse(_) => {
                                 error!("You can't change the server signal from the client side")
                             }
                         }

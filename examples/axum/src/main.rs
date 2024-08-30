@@ -36,10 +36,7 @@ use leptos_axum::{
 #[cfg(feature = "ssr")]
 use leptos_axum::{handle_server_fns_with_context, AxumRouteListing};
 #[cfg(feature = "ssr")]
-use leptos_ws::{
-    server_signal::{self, ServerSignal},
-    server_signals::ServerSignals,
-};
+use leptos_ws::{server_signals::ServerSignals, ServerSignal};
 #[cfg(feature = "ssr")]
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 #[cfg(feature = "ssr")]
@@ -137,7 +134,6 @@ async fn main() {
         .leptos_routes_with_handler(routes, get(leptos_routes_handler))
         .fallback(file_and_error_handler)
         .with_state(state);
-
     // run our app with hyper
     // `axum::Server` is a re-export of `hyper::Server`
     leptos::logging::log!("listening on http://{}", &addr);

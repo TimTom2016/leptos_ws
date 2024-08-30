@@ -26,6 +26,8 @@ where
 pub trait ClientSignalTrait {
     fn as_any(&self) -> &dyn Any;
     fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error>;
+    fn json(&self) -> Result<Value, Error>;
+    fn set_json(&self, new_value: Value) -> Result<(), Error>;
     fn track(&self);
 }
 impl<T> ClientSignalTrait for ClientSignal<T>
@@ -53,6 +55,19 @@ where
         } else {
             Err(Error::UpdateSignalFailed)
         }
+    }
+    fn json(&self) -> Result<Value, Error> {
+        Ok(serde_json::to_value(self.value.get())?)
+    }
+    fn set_json(&self, new_value: Value) -> Result<(), Error> {
+        let mut writer = self
+            .json_value
+            .write()
+            .map_err(|_| Error::UpdateSignalFailed)?;
+        *writer = new_value;
+        *self.value.write() = serde_json::from_value(writer.clone())
+            .map_err(|err| Error::SerializationFailed(err))?;
+        Ok(())
     }
 }
 

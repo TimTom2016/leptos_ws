@@ -41,6 +41,7 @@ pub trait ServerSignalTrait {
     async fn add_observer(&self) -> Receiver<ServerSignalUpdate>;
     async fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error>;
     async fn update_if_changed(&self) -> Result<(), Error>;
+    fn json(&self) -> Result<Value, Error>;
     fn as_any(&self) -> &dyn Any;
     fn track(&self);
 }
@@ -51,7 +52,7 @@ where
     T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static + Serialize,
 {
     async fn add_observer(&self) -> Receiver<ServerSignalUpdate> {
-        self.subscribe().await
+        self.subscribe()
     }
 
     async fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error> {
@@ -79,6 +80,10 @@ where
                 .await;
         }
         res
+    }
+
+    fn json(&self) -> Result<Value, Error> {
+        Ok(serde_json::to_value(self.value.get())?)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -112,7 +117,7 @@ where
         Ok(signal)
     }
 
-    pub async fn subscribe(&self) -> Receiver<ServerSignalUpdate> {
+    pub fn subscribe(&self) -> Receiver<ServerSignalUpdate> {
         self.observers.subscribe()
     }
 }

@@ -1,4 +1,6 @@
 #[cfg(not(feature = "ssr"))]
+use crate::client_signal::ClientSignal;
+#[cfg(not(feature = "ssr"))]
 use client_signals::ClientSignals;
 use json_patch::Patch;
 use leptos::*;
@@ -32,6 +34,12 @@ pub mod client_signals;
 
 #[cfg(all(feature = "axum", feature = "ssr"))]
 pub mod axum;
+
+#[cfg(feature = "ssr")]
+pub type ServerSignal<T> = server_signal::ServerSignal<T>;
+#[cfg(not(feature = "ssr"))]
+pub type ServerSignal<T> = ClientSignal<T>;
+
 #[cfg(not(feature = "ssr"))]
 #[derive(Clone)]
 pub struct ServerSignalWebSocket {
@@ -104,6 +112,9 @@ fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
 
                 match serde_json::from_str::<Messages>(&ws_string) {
                     Ok(Messages::Establish(_)) => todo!(),
+                    Ok(Messages::EstablishResponse((name, value))) => {
+                        handlers.set_json(name, value);
+                    }
                     Ok(Messages::Update(update)) => {
                         let name = &update.name;
                         let mut delayed_map = (*delayed_updates).lock().unwrap();
@@ -113,17 +124,13 @@ fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
                             }
                         }
                         handlers.update(name.to_string(), update);
-                        // delayed_map
-                        //     .entry(name.clone())
-                        //     .or_default()
-                        //     .push(update_signal.patch.clone());
                     }
                     Err(err) => {
                         warn!("Couldn't deserialize Socket Message {}", err)
                     }
                 }
             }) as Box<dyn FnMut(_)>);
-            let mut ws2 = ws.clone();
+            let ws2 = ws.clone();
             let onopen_callback = Closure::<dyn FnMut()>::new(move || {
                 if let Ok(mut delayed_msgs) = ws2.delayed_msgs.lock() {
                     for msg in delayed_msgs.drain(..) {
@@ -158,73 +165,4 @@ fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
 
 pub fn provide_websocket(url: &str) -> Result<Option<WebSocket>, JsValue> {
     provide_websocket_inner(url)
-}
-
-/// A server signal update containing the signal type name and json patch.
-///
-/// This is whats sent over the websocket, and is used to patch the signal if the type name matches.
-#[cfg(feature = "ssr")]
-#[cfg(test)]
-mod test {
-    use std::{time::Duration, vec};
-
-    use any_spawner::Executor;
-    use leptos::prelude::*;
-    use tokio::{spawn, task, time::sleep};
-    use web_sys::js_sys::Math::sign;
-    #[derive(Clone, Serialize, Deserialize)]
-    pub struct History(pub Vec<f64>);
-
-    impl Into<ArcRwSignal<History>> for History {
-        fn into(self) -> ArcRwSignal<History> {
-            ArcRwSignal::new(self)
-        }
-    }
-
-    use crate::{
-        error,
-        server_signal::{ServerSignal, ServerSignalTrait},
-        server_signals::{self, ServerSignals},
-        History,
-    };
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn server_signal_test() {
-        let history = "History".to_string();
-        _ = Executor::init_tokio();
-        let _owner = Owner::new();
-        _owner.set();
-        let server_signals = ServerSignals::new();
-        provide_context(server_signals.clone());
-        use_context::<ServerSignals>().unwrap();
-        let signal = ServerSignal::new(history.clone(), History(vec![1.0, 2.0, 3.0, 4.0])).unwrap();
-        let text = RwSignal::new("".to_string());
-        let signal2 = signal.clone();
-        signal2.update(|values| values.0.push(5.0));
-        signal2.update(|values| values.0.push(5.0 + 1 as f64));
-        signal2.update(|values| values.0.push(5.0 + 2 as f64));
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn observer_test() {
-        let history = "History".to_string();
-        _ = Executor::init_tokio();
-        let _owner = Owner::new();
-        _owner.set();
-        let server_signals = ServerSignals::new();
-        provide_context(server_signals.clone());
-        use_context::<ServerSignals>().unwrap();
-        let signal = ServerSignal::new(history.clone(), History(vec![1.0, 2.0, 3.0, 4.0])).unwrap();
-        let mut observer = signal.add_observer().await;
-        let signal2 = signal.clone();
-        signal2.update(|values| values.0.push(5.0));
-        Executor::tick().await;
-        println!("{:?}", observer.recv().await);
-        signal2.update(|values| values.0.push(5.0 + 1 as f64));
-        Executor::tick().await;
-        println!("{:?}", observer.recv().await);
-        signal2.update(|values| values.0.push(5.0 + 2 as f64));
-        Executor::tick().await;
-        println!("{:?}", observer.recv().await);
-    }
 }
