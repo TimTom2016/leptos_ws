@@ -1,18 +1,13 @@
+#![feature(unboxed_closures)]
+#[cfg(not(feature = "ssr"))]
+use crate::client_signal::ClientSignal;
 #[cfg(not(feature = "ssr"))]
 use client_signals::ClientSignals;
-use json_patch::Patch;
 use leptos::*;
-use messages::{Messages, ServerSignalUpdate};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::{
-    any::{Any, TypeId},
-    borrow::Cow,
-    cell::RefCell,
-    collections::HashMap,
-    rc::Rc,
-    sync::{Arc, Mutex},
-};
+#[cfg(not(feature = "ssr"))]
+use messages::Messages;
+#[cfg(not(feature = "ssr"))]
+use std::sync::{Arc, Mutex};
 use wasm_bindgen::JsValue;
 use web_sys::WebSocket;
 
@@ -32,6 +27,12 @@ pub mod client_signals;
 
 #[cfg(all(feature = "axum", feature = "ssr"))]
 pub mod axum;
+
+#[cfg(feature = "ssr")]
+pub type ServerSignal<T> = server_signal::ServerSignal<T>;
+#[cfg(not(feature = "ssr"))]
+pub type ServerSignal<T> = ClientSignal<T>;
+
 #[cfg(not(feature = "ssr"))]
 #[derive(Clone)]
 pub struct ServerSignalWebSocket {
@@ -44,7 +45,6 @@ pub struct ServerSignalWebSocket {
     // Without that, we don't have a base state to apply the patches to,
     // and therefore we must keep a record of the patches to apply after
     // the state has been set up.
-    delayed_updates: Arc<Mutex<HashMap<String, Vec<ServerSignalUpdate>>>>,
     delayed_msgs: Arc<Mutex<Vec<Messages>>>,
 }
 #[cfg(not(feature = "ssr"))]
@@ -69,10 +69,8 @@ impl ServerSignalWebSocket {
 #[cfg(not(feature = "ssr"))]
 #[inline]
 fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
-    use std::time::Duration;
-
     use leptos::prelude::{provide_context, use_context};
-    use prelude::{set_timeout, warn};
+    use prelude::warn;
     use wasm_bindgen::{prelude::Closure, JsCast};
     use web_sys::js_sys::{Function, JsString};
     use web_sys::MessageEvent;
@@ -83,7 +81,6 @@ fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
         provide_context(ServerSignalWebSocket {
             ws,
             state_signals: ClientSignals::new(),
-            delayed_updates: Arc::default(),
             delayed_msgs: Arc::default(),
         });
     }
@@ -92,7 +89,6 @@ fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
         Some(ws) => {
             let handlers = ws.state_signals.clone();
             provide_context(ws.state_signals.clone());
-            let delayed_updates = ws.delayed_updates.clone();
 
             let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
                 let ws_string = event
@@ -104,26 +100,19 @@ fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
 
                 match serde_json::from_str::<Messages>(&ws_string) {
                     Ok(Messages::Establish(_)) => todo!(),
+                    Ok(Messages::EstablishResponse((name, value))) => {
+                        handlers.set_json(name, value);
+                    }
                     Ok(Messages::Update(update)) => {
                         let name = &update.name;
-                        let mut delayed_map = (*delayed_updates).lock().unwrap();
-                        if let Some(delayed_patches) = delayed_map.remove(&name.to_string()) {
-                            for patch in delayed_patches {
-                                handlers.update(name.to_string(), patch);
-                            }
-                        }
                         handlers.update(name.to_string(), update);
-                        // delayed_map
-                        //     .entry(name.clone())
-                        //     .or_default()
-                        //     .push(update_signal.patch.clone());
                     }
                     Err(err) => {
                         warn!("Couldn't deserialize Socket Message {}", err)
                     }
                 }
             }) as Box<dyn FnMut(_)>);
-            let mut ws2 = ws.clone();
+            let ws2 = ws.clone();
             let onopen_callback = Closure::<dyn FnMut()>::new(move || {
                 if let Ok(mut delayed_msgs) = ws2.delayed_msgs.lock() {
                     for msg in delayed_msgs.drain(..) {
@@ -149,82 +138,10 @@ fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
 
 #[cfg(feature = "ssr")]
 #[inline]
-fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
-    use wasm_bindgen::JsValue;
-    use web_sys::WebSocket;
-
+fn provide_websocket_inner(_url: &str) -> Result<Option<WebSocket>, JsValue> {
     Ok(None)
 }
 
 pub fn provide_websocket(url: &str) -> Result<Option<WebSocket>, JsValue> {
     provide_websocket_inner(url)
-}
-
-/// A server signal update containing the signal type name and json patch.
-///
-/// This is whats sent over the websocket, and is used to patch the signal if the type name matches.
-#[cfg(feature = "ssr")]
-#[cfg(test)]
-mod test {
-    use std::{time::Duration, vec};
-
-    use any_spawner::Executor;
-    use leptos::prelude::*;
-    use tokio::{spawn, task, time::sleep};
-    use web_sys::js_sys::Math::sign;
-    #[derive(Clone, Serialize, Deserialize)]
-    pub struct History(pub Vec<f64>);
-
-    impl Into<ArcRwSignal<History>> for History {
-        fn into(self) -> ArcRwSignal<History> {
-            ArcRwSignal::new(self)
-        }
-    }
-
-    use crate::{
-        error,
-        server_signal::{ServerSignal, ServerSignalTrait},
-        server_signals::{self, ServerSignals},
-        History,
-    };
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn server_signal_test() {
-        let history = "History".to_string();
-        _ = Executor::init_tokio();
-        let _owner = Owner::new();
-        _owner.set();
-        let server_signals = ServerSignals::new();
-        provide_context(server_signals.clone());
-        use_context::<ServerSignals>().unwrap();
-        let signal = ServerSignal::new(history.clone(), History(vec![1.0, 2.0, 3.0, 4.0])).unwrap();
-        let text = RwSignal::new("".to_string());
-        let signal2 = signal.clone();
-        signal2.update(|values| values.0.push(5.0));
-        signal2.update(|values| values.0.push(5.0 + 1 as f64));
-        signal2.update(|values| values.0.push(5.0 + 2 as f64));
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    pub async fn observer_test() {
-        let history = "History".to_string();
-        _ = Executor::init_tokio();
-        let _owner = Owner::new();
-        _owner.set();
-        let server_signals = ServerSignals::new();
-        provide_context(server_signals.clone());
-        use_context::<ServerSignals>().unwrap();
-        let signal = ServerSignal::new(history.clone(), History(vec![1.0, 2.0, 3.0, 4.0])).unwrap();
-        let mut observer = signal.add_observer().await;
-        let signal2 = signal.clone();
-        signal2.update(|values| values.0.push(5.0));
-        Executor::tick().await;
-        println!("{:?}", observer.recv().await);
-        signal2.update(|values| values.0.push(5.0 + 1 as f64));
-        Executor::tick().await;
-        println!("{:?}", observer.recv().await);
-        signal2.update(|values| values.0.push(5.0 + 2 as f64));
-        Executor::tick().await;
-        println!("{:?}", observer.recv().await);
-    }
 }

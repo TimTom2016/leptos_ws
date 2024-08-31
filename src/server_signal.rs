@@ -1,29 +1,17 @@
-use std::any::{type_name, Any};
-use std::marker::PhantomData;
-use std::ops::{self, Deref, DerefMut};
-use std::panic::Location;
-use std::sync::atomic::AtomicBool;
+use std::any::Any;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use std::{any::TypeId, borrow::Cow};
 
 use crate::error::Error;
 use crate::messages::ServerSignalUpdate;
 use crate::server_signals::ServerSignals;
 use axum::async_trait;
 use futures::executor::block_on;
-use futures::sink::{Sink, SinkExt};
-use graph::ReactiveNode;
-use guards::{UntrackedWriteGuard, WriteGuard};
-use json_patch::Patch;
 use leptos::prelude::*;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use thiserror::Error;
-use tokio::spawn;
 use tokio::sync::broadcast::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
-use tokio::task::block_in_place;
 
 /// A signal owned by the server which writes to the websocket when mutated.
 #[derive(Clone, Debug)]
@@ -41,6 +29,7 @@ pub trait ServerSignalTrait {
     async fn add_observer(&self) -> Receiver<ServerSignalUpdate>;
     async fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error>;
     async fn update_if_changed(&self) -> Result<(), Error>;
+    fn json(&self) -> Result<Value, Error>;
     fn as_any(&self) -> &dyn Any;
     fn track(&self);
 }
@@ -51,14 +40,14 @@ where
     T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static + Serialize,
 {
     async fn add_observer(&self) -> Receiver<ServerSignalUpdate> {
-        self.subscribe().await
+        self.subscribe()
     }
 
     async fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error> {
         let mut writer = self.json_value.write().await;
         if json_patch::patch(writer.deref_mut(), &patch.patch).is_ok() {
             //*self.value.write() = serde_json::from_value(writer.clone())?;
-            self.observers.send(patch);
+            let _ = self.observers.send(patch);
             Ok(())
         } else {
             Err(Error::UpdateSignalFailed)
@@ -81,6 +70,10 @@ where
         res
     }
 
+    fn json(&self) -> Result<Value, Error> {
+        Ok(serde_json::to_value(self.value.get())?)
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -100,7 +93,7 @@ where
         if block_on(signals.contains(&name)) {
             return Ok(block_on(signals.get_signal::<ServerSignal<T>>(name)).unwrap());
         }
-        let (send, recv) = channel(32);
+        let (send, _) = channel(32);
         let new_signal = ServerSignal {
             name: name.clone(),
             value: ArcRwSignal::new(value.clone()),
@@ -112,7 +105,7 @@ where
         Ok(signal)
     }
 
-    pub async fn subscribe(&self) -> Receiver<ServerSignalUpdate> {
+    pub fn subscribe(&self) -> Receiver<ServerSignalUpdate> {
         self.observers.subscribe()
     }
 }
@@ -132,7 +125,7 @@ where
         }
         drop(lock);
         block_on(async move {
-            self.update_if_changed().await;
+            let _ = self.update_if_changed().await;
         });
         Some(val)
     }

@@ -7,7 +7,6 @@ use axum::{
     response::IntoResponse,
 };
 use leptos::prelude::*;
-use leptos_ws::server_signals::ServerSignals;
 use tower::ServiceExt;
 use tower_http::services::ServeDir;
 
