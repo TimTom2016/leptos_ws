@@ -41,7 +41,7 @@ pub fn App() -> impl IntoView {
 async fn update_count() -> Result<(), ServerFnError> {
     use std::time::Duration;
     use tokio::time::sleep;
-    let count = leptos_ws::server_signal::ServerSignal::new("count".to_string(), 0 as i32).unwrap();
+    let count = leptos_ws::ServerSignal::new("count".to_string(), 0 as i32).unwrap();
     for i in 0..1000 {
         count.update(move |value| *value = i);
         sleep(Duration::from_secs(1)).await;
@@ -53,11 +53,8 @@ async fn update_count() -> Result<(), ServerFnError> {
 async fn update_history() -> Result<(), ServerFnError> {
     use std::time::Duration;
     use tokio::time::sleep;
-    let history = leptos_ws::server_signal::ServerSignal::new(
-        "history".to_string(),
-        History { entries: vec![] },
-    )
-    .unwrap();
+    let history =
+        leptos_ws::ServerSignal::new("history".to_string(), History { entries: vec![] }).unwrap();
     for i in 0..255 {
         history.update(move |value| {
             value.entries.push(HistoryEntry {

@@ -1137,7 +1137,7 @@ dependencies = [
 
 [[package]]
 name = "leptos_ws"
-version = "0.1.0"
+version = "0.7.0-beta2"
 dependencies = [
  "async-trait",
  "axum",
@@ -1149,7 +1149,6 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
- "uuid",
  "wasm-bindgen",
  "web-sys",
 ]

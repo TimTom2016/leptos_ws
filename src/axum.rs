@@ -8,7 +8,7 @@ use tokio::{
     sync::{broadcast::Receiver, RwLock},
 };
 
-pub async fn handle_broadcasts(
+async fn handle_broadcasts(
     mut receiver: Receiver<ServerSignalUpdate>,
     sink: Arc<RwLock<SplitSink<axum::extract::ws::WebSocket, axum::extract::ws::Message>>>,
 ) {
@@ -29,7 +29,46 @@ pub async fn handle_broadcasts(
 
 use axum::extract::WebSocketUpgrade;
 use axum::response::Response;
-
+/// Creates a WebSocket handler function for upgrading HTTP connections to WebSocket connections.
+///
+/// This function returns a closure that can be used as a route handler in an Axum web server to handle
+/// WebSocket upgrade requests. It sets up the necessary infrastructure to manage WebSocket
+/// connections and integrate them with the server's signaling system.
+///
+/// # Arguments
+///
+/// * `server_signals` - A `ServerSignals` instance that provides access to server-wide
+///   communication channels and state.
+///
+/// # Returns
+///
+/// Returns an implementation of a function that:
+/// - Takes a `WebSocketUpgrade` as an argument
+/// - Returns a `BoxFuture<'static, Response>`
+/// - Is `Clone`, `Send`, and has a `'static` lifetime
+///
+/// The returned function handles the WebSocket upgrade process and delegates the actual
+/// WebSocket communication to the `handle_socket` function.
+///
+/// # Example
+///
+/// ```
+/// use axum::Router;
+/// use axum::routing::{get, post};
+///
+/// let app = Router::new()
+///     .route("/api/*fn_name", post(server_fn_handler))
+///     .route(
+///         "/ws",
+///         get(leptos_ws::axum::websocket(state.server_signals.clone())),
+///     )
+///     .leptos_routes_with_handler(routes, get(leptos_routes_handler))
+///     .fallback(file_and_error_handler)
+///     .with_state(state);
+/// ```
+///
+/// In this example, the `websocket` function is used to create a WebSocket handler for the "/ws" route
+/// in an Axum router configuration.
 pub fn websocket(
     server_signals: ServerSignals,
 ) -> impl Fn(WebSocketUpgrade) -> BoxFuture<'static, Response> + Clone + Send + 'static {
