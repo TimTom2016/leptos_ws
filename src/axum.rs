@@ -1,10 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
-
 use crate::{
     messages::Messages,
     messages::ServerSignalUpdate,
     server_signals::{self, ServerSignals},
 };
+use axum::handler::Handler;
 use axum::{
     async_trait,
     extract::{ws::Message, State},
@@ -19,6 +18,7 @@ use leptos::{
     prelude::warn,
     reactive_graph::{effect::Effect, owner::expect_context},
 };
+use std::{collections::HashMap, sync::Arc};
 use tokio::{
     spawn,
     sync::{
@@ -47,11 +47,16 @@ pub async fn handle_broadcasts(
     }
 }
 
-pub async fn websocket(
-    ws: axum::extract::WebSocketUpgrade,
-    State(server_signals): State<ServerSignals>,
-) -> axum::response::Response {
-    ws.on_upgrade(move |socket| handle_socket(socket, server_signals))
+use axum::extract::WebSocketUpgrade;
+use axum::response::Response;
+
+pub fn websocket(
+    server_signals: ServerSignals,
+) -> impl Fn(WebSocketUpgrade) -> BoxFuture<'static, Response> + Clone + Send + 'static {
+    move |ws: WebSocketUpgrade| {
+        let value = server_signals.clone();
+        Box::pin(async move { ws.on_upgrade(move |socket| handle_socket(socket, value)) })
+    }
 }
 
 async fn handle_socket(mut socket: axum::extract::ws::WebSocket, server_signals: ServerSignals) {

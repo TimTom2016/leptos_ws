@@ -34,10 +34,7 @@ pub async fn file_and_error_handler(
     if res.status() == StatusCode::OK {
         res.into_response()
     } else {
-        let handler = leptos_axum::render_app_to_stream_with_context(
-            move || provide_context(state.server_signals.clone()),
-            App,
-        );
+        let handler = leptos_axum::render_app_to_stream_with_context(move || (), App);
         handler(Request::from_parts(parts, body))
             .await
             .into_response()

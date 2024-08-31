@@ -1,3 +1,4 @@
+#![feature(unboxed_closures)]
 #[cfg(not(feature = "ssr"))]
 use crate::client_signal::ClientSignal;
 #[cfg(not(feature = "ssr"))]

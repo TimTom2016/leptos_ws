@@ -130,7 +130,10 @@ async fn main() {
     state.routes = Some(routes.clone());
     let app = Router::new()
         .route("/api/*fn_name", post(server_fn_handler))
-        .route("/ws", get(leptos_ws::axum::websocket))
+        .route(
+            "/ws",
+            get(leptos_ws::axum::websocket(state.server_signals.clone())),
+        )
         .leptos_routes_with_handler(routes, get(leptos_routes_handler))
         .fallback(file_and_error_handler)
         .with_state(state);
