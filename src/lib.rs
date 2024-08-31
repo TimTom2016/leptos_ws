@@ -3,19 +3,11 @@
 use crate::client_signal::ClientSignal;
 #[cfg(not(feature = "ssr"))]
 use client_signals::ClientSignals;
-use json_patch::Patch;
 use leptos::*;
-use messages::{Messages, ServerSignalUpdate};
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::{
-    any::{Any, TypeId},
-    borrow::Cow,
-    cell::RefCell,
-    collections::HashMap,
-    rc::Rc,
-    sync::{Arc, Mutex},
-};
+#[cfg(not(feature = "ssr"))]
+use messages::Messages;
+#[cfg(not(feature = "ssr"))]
+use std::sync::{Arc, Mutex};
 use wasm_bindgen::JsValue;
 use web_sys::WebSocket;
 
@@ -53,7 +45,6 @@ pub struct ServerSignalWebSocket {
     // Without that, we don't have a base state to apply the patches to,
     // and therefore we must keep a record of the patches to apply after
     // the state has been set up.
-    delayed_updates: Arc<Mutex<HashMap<String, Vec<ServerSignalUpdate>>>>,
     delayed_msgs: Arc<Mutex<Vec<Messages>>>,
 }
 #[cfg(not(feature = "ssr"))]
@@ -78,10 +69,8 @@ impl ServerSignalWebSocket {
 #[cfg(not(feature = "ssr"))]
 #[inline]
 fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
-    use std::time::Duration;
-
     use leptos::prelude::{provide_context, use_context};
-    use prelude::{set_timeout, warn};
+    use prelude::warn;
     use wasm_bindgen::{prelude::Closure, JsCast};
     use web_sys::js_sys::{Function, JsString};
     use web_sys::MessageEvent;
@@ -92,7 +81,6 @@ fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
         provide_context(ServerSignalWebSocket {
             ws,
             state_signals: ClientSignals::new(),
-            delayed_updates: Arc::default(),
             delayed_msgs: Arc::default(),
         });
     }
@@ -101,7 +89,6 @@ fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
         Some(ws) => {
             let handlers = ws.state_signals.clone();
             provide_context(ws.state_signals.clone());
-            let delayed_updates = ws.delayed_updates.clone();
 
             let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
                 let ws_string = event
@@ -118,12 +105,6 @@ fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
                     }
                     Ok(Messages::Update(update)) => {
                         let name = &update.name;
-                        let mut delayed_map = (*delayed_updates).lock().unwrap();
-                        if let Some(delayed_patches) = delayed_map.remove(&name.to_string()) {
-                            for patch in delayed_patches {
-                                handlers.update(name.to_string(), patch);
-                            }
-                        }
                         handlers.update(name.to_string(), update);
                     }
                     Err(err) => {
@@ -157,10 +138,7 @@ fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
 
 #[cfg(feature = "ssr")]
 #[inline]
-fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
-    use wasm_bindgen::JsValue;
-    use web_sys::WebSocket;
-
+fn provide_websocket_inner(_url: &str) -> Result<Option<WebSocket>, JsValue> {
     Ok(None)
 }
 

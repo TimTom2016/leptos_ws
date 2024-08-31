@@ -30,19 +30,11 @@ use leptos::{
     prelude::{provide_context, *},
 };
 #[cfg(feature = "ssr")]
-use leptos_axum::{
-    generate_route_list, generate_route_list_with_exclusions_and_ssg_and_context, LeptosRoutes,
-};
+use leptos_axum::{generate_route_list_with_exclusions_and_ssg_and_context, LeptosRoutes};
 #[cfg(feature = "ssr")]
 use leptos_axum::{handle_server_fns_with_context, AxumRouteListing};
 #[cfg(feature = "ssr")]
-use leptos_ws::{server_signals::ServerSignals, ServerSignal};
-#[cfg(feature = "ssr")]
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-#[cfg(feature = "ssr")]
-use tokio::net::TcpListener;
-#[cfg(feature = "ssr")]
-use tokio::spawn;
+use leptos_ws::server_signals::ServerSignals;
 
 #[cfg(feature = "ssr")]
 #[derive(Clone, FromRef)]
@@ -120,7 +112,6 @@ async fn main() {
     // The file would need to be included with the executable when moved to deployment
     let addr = leptos_options.site_addr;
     let state2 = state.clone();
-    let state3 = state.clone();
 
     let (routes, _) = generate_route_list_with_exclusions_and_ssg_and_context(
         || view! { <App/> },

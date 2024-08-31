@@ -1,31 +1,11 @@
-use crate::{
-    messages::Messages,
-    messages::ServerSignalUpdate,
-    server_signals::{self, ServerSignals},
-};
-use axum::handler::Handler;
-use axum::{
-    async_trait,
-    extract::{ws::Message, State},
-};
-use futures::{
-    future::BoxFuture,
-    stream::{select_all, SplitSink},
-    Future, SinkExt, StreamExt,
-};
+use crate::{messages::Messages, messages::ServerSignalUpdate, server_signals::ServerSignals};
+use axum::extract::ws::Message;
+use futures::{future::BoxFuture, stream::SplitSink, SinkExt, StreamExt};
 use leptos::logging::error;
-use leptos::{
-    prelude::warn,
-    reactive_graph::{effect::Effect, owner::expect_context},
-};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tokio::{
     spawn,
-    sync::{
-        broadcast::{channel, error::RecvError, Receiver, Sender},
-        Mutex, RwLock,
-    },
-    task::JoinSet,
+    sync::{broadcast::Receiver, RwLock},
 };
 
 pub async fn handle_broadcasts(
@@ -59,10 +39,9 @@ pub fn websocket(
     }
 }
 
-async fn handle_socket(mut socket: axum::extract::ws::WebSocket, server_signals: ServerSignals) {
-    let (mut send, mut recv) = socket.split();
+async fn handle_socket(socket: axum::extract::ws::WebSocket, server_signals: ServerSignals) {
+    let (send, mut recv) = socket.split();
     let send = Arc::new(RwLock::new(send));
-    let server_signals2 = server_signals.clone();
     spawn(async move {
         while let Some(message) = recv.next().await {
             if let Ok(msg) = message {
@@ -71,8 +50,7 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, server_signals:
                         let message: Messages = serde_json::from_str(&text).unwrap();
                         match message {
                             Messages::Establish(name) => {
-                                let mut recv =
-                                    server_signals.add_observer(name.clone()).await.unwrap();
+                                let recv = server_signals.add_observer(name.clone()).await.unwrap();
                                 send.clone()
                                     .write()
                                     .await
@@ -87,10 +65,11 @@ async fn handle_socket(mut socket: axum::extract::ws::WebSocket, server_signals:
                                         )))
                                         .unwrap(),
                                     ))
-                                    .await;
+                                    .await
+                                    .unwrap();
                                 spawn(handle_broadcasts(recv, send.clone()));
                             }
-                            Messages::Update(update) => {
+                            Messages::Update(_) => {
                                 error!("You can't change the server signal from the client side")
                             }
                             Messages::EstablishResponse(_) => {

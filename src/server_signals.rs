@@ -1,17 +1,7 @@
 use crate::{error::Error, messages::ServerSignalUpdate, server_signal::ServerSignalTrait};
-use futures::executor::block_on;
-use json_patch::Patch;
 use leptos::prelude::*;
 use serde_json::Value;
-use std::{
-    any::{Any, TypeId},
-    borrow::{Borrow, Cow},
-    cell::RefCell,
-    collections::HashMap,
-    ops::{Deref, DerefMut},
-    rc::Rc,
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::{broadcast::Receiver, RwLock};
 
 #[derive(Clone)]

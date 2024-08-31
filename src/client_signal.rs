@@ -1,9 +1,3 @@
-use std::{
-    any::Any,
-    ops::{Deref, DerefMut},
-    sync::{Arc, RwLock},
-};
-
 use crate::error::Error;
 use crate::{client_signals::ClientSignals, messages::ServerSignalUpdate};
 use async_trait::async_trait;
@@ -11,13 +5,18 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::{
+    any::Any,
+    ops::{Deref, DerefMut},
+    sync::{Arc, RwLock},
+};
+use thiserror::Error;
 
 #[derive(Clone, Debug)]
 pub struct ClientSignal<T>
 where
     T: Clone + Send + Sync + for<'de> Deserialize<'de>,
 {
-    name: String,
     value: ArcRwSignal<T>,
     json_value: Arc<RwLock<Value>>,
 }
@@ -82,7 +81,6 @@ where
             return Ok(signals.get_signal::<ClientSignal<T>>(name).unwrap());
         }
         let new_signal = Self {
-            name: name.clone(),
             value: ArcRwSignal::new(value.clone()),
             json_value: Arc::new(RwLock::new(
                 serde_json::to_value(value).map_err(|err| Error::SerializationFailed(err))?,
@@ -100,7 +98,7 @@ where
 {
     type Value = T;
 
-    fn try_maybe_update<U>(&self, fun: impl FnOnce(&mut Self::Value) -> (bool, U)) -> Option<U> {
+    fn try_maybe_update<U>(&self, _fun: impl FnOnce(&mut Self::Value) -> (bool, U)) -> Option<U> {
         None
     }
 }
