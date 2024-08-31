@@ -4,7 +4,6 @@ version = "0.7.0-beta2"
 edition = "2021"
 license = "MIT"
 authors = ["Tim Persigehl <dev@timtom2016.com>"]
-license-file = "LICENSE"
 description = "Leptos WS is a Websocket for the Leptos framework to support updates coordinated from the Server "
 documentation = "https://docs.rs/leptos_ws/latest/"
 repository = "https://github.com/TimTom2016/leptos_ws"

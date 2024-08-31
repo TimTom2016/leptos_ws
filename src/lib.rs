@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 #![feature(unboxed_closures)]
 #[cfg(not(feature = "ssr"))]
 use crate::client_signal::ClientSignal;
