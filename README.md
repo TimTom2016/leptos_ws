@@ -1,5 +1,3 @@
-Here's an improved version of your README:
-
 # Leptos Websocket
 
 [![Crates.io](https://img.shields.io/crates/v/leptos_ws.svg)](https://crates.io/crates/leptos_ws)
