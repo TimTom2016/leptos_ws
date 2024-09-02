@@ -90,7 +90,7 @@ pub type ServerSignal<T> = ClientSignal<T>;
 #[cfg(not(feature = "ssr"))]
 #[derive(Clone)]
 struct ServerSignalWebSocket {
-    send: Option<Arc<dyn Fn(&Messages) + Send + Sync + 'static>>,
+    send: Arc<dyn Fn(&Messages) + Send + Sync + 'static>,
     ready_state: Signal<ConnectionReadyState>,
     state_signals: ClientSignals,
     delayed_msgs: Arc<Mutex<Vec<Messages>>>,
@@ -101,59 +101,63 @@ impl ServerSignalWebSocket {
         if self.ready_state.get() != ConnectionReadyState::Open {
             self.delayed_msgs.lock().unwrap().push(msg.clone());
         } else {
-            (self.send.as_ref().unwrap())(&msg);
+            (self.send)(&msg);
         }
         Ok(())
     }
     pub fn new(url: &str) -> Self {
-        use leptos::prelude::{provide_context, use_context};
+        use leptos::prelude::provide_context;
         use leptos_use::{use_websocket_with_options, UseWebSocketOptions, UseWebSocketReturn};
         use prelude::warn;
 
         let delayed_msgs = Arc::default();
         let state_signals = ClientSignals::new();
-        let mut ws = Self {
-            ready_state: signal(ConnectionReadyState::Closed).0.into(),
-            send: None,
-            state_signals,
-            delayed_msgs,
-        };
-        let ws2 = ws.clone();
-        let ws3 = ws.clone();
-        let onopen_callback = move |_| {
-            if let Ok(mut delayed_msgs) = ws2.delayed_msgs.lock() {
-                let mut messages = delayed_msgs.clone();
-                delayed_msgs.clear();
-                drop(delayed_msgs);
-                for msg in messages.iter() {
-                    if let Err(err) = ws2.send(&msg) {
-                        eprintln!("Failed to send delayed message: {:?}", err);
-                    }
-                }
-            }
-        };
+        let state_signals2 = state_signals.clone();
         let on_message_callback = move |msg: &Messages| match msg {
             Messages::Establish(_) => todo!(),
             Messages::EstablishResponse((name, value)) => {
-                ws3.state_signals.set_json(name, value.to_owned());
+                state_signals2.set_json(name, value.to_owned());
             }
             Messages::Update(update) => {
                 let name = &update.name;
-                ws3.state_signals.update(&name, update.to_owned());
+                state_signals2.update(&name, update.to_owned());
             }
         };
         let UseWebSocketReturn {
-            ready_state, send, ..
+            ready_state,
+            send,
+            open,
+            ..
         } = use_websocket_with_options::<Messages, Messages, JsonSerdeCodec>(
             url,
             UseWebSocketOptions::default()
-                .on_open(onopen_callback)
-                .on_message(on_message_callback),
+                .on_message(on_message_callback)
+                .immediate(false),
         );
-        ws.ready_state = ready_state;
-        ws.send = Some(Arc::new(send));
+        let ready_state2 = ready_state.clone();
+        let mut ws = Self {
+            ready_state,
+            send: Arc::new(send),
+            state_signals,
+            delayed_msgs,
+        };
+        open();
+        let ws2 = ws.clone();
         provide_context(ws.state_signals.clone());
-
+        Effect::new(move |_| {
+            if ready_state2.get() == ConnectionReadyState::Open {
+                if let Ok(mut delayed_msgs) = ws2.delayed_msgs.lock() {
+                    let messages = delayed_msgs.clone();
+                    delayed_msgs.clear();
+                    drop(delayed_msgs);
+                    for msg in messages.iter() {
+                        if let Err(err) = ws2.send(&msg) {
+                            eprintln!("Failed to send delayed message: {:?}", err);
+                        }
+                    }
+                }
+            }
+        });
         ws
     }
 }
