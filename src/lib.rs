@@ -5,10 +5,11 @@ use crate::client_signal::ClientSignal;
 #[cfg(not(feature = "ssr"))]
 use client_signals::ClientSignals;
 use codee::string::JsonSerdeCodec;
-use error::Error;
 use leptos::prelude::*;
-use leptos::*;
+#[cfg(not(feature = "ssr"))]
 use leptos_use::core::ConnectionReadyState;
+#[cfg(not(feature = "ssr"))]
+use leptos_use::{use_websocket_with_options, UseWebSocketOptions, UseWebSocketReturn};
 #[cfg(not(feature = "ssr"))]
 use messages::Messages;
 
@@ -92,37 +93,26 @@ pub type ServerSignal<T> = ClientSignal<T>;
 struct ServerSignalWebSocket {
     send: Arc<dyn Fn(&Messages) + Send + Sync + 'static>,
     ready_state: Signal<ConnectionReadyState>,
-    state_signals: ClientSignals,
     delayed_msgs: Arc<Mutex<Vec<Messages>>>,
 }
 #[cfg(not(feature = "ssr"))]
 impl ServerSignalWebSocket {
     pub fn send(&self, msg: &Messages) -> Result<(), serde_json::Error> {
         if self.ready_state.get() != ConnectionReadyState::Open {
-            self.delayed_msgs.lock().unwrap().push(msg.clone());
+            self.delayed_msgs
+                .lock()
+                .expect("Failed to lock delayed_msgs")
+                .push(msg.clone());
         } else {
             (self.send)(&msg);
         }
         Ok(())
     }
     pub fn new(url: &str) -> Self {
-        use leptos::prelude::provide_context;
-        use leptos_use::{use_websocket_with_options, UseWebSocketOptions, UseWebSocketReturn};
-        use prelude::warn;
-
         let delayed_msgs = Arc::default();
         let state_signals = ClientSignals::new();
-        let state_signals2 = state_signals.clone();
-        let on_message_callback = move |msg: &Messages| match msg {
-            Messages::Establish(_) => todo!(),
-            Messages::EstablishResponse((name, value)) => {
-                state_signals2.set_json(name, value.to_owned());
-            }
-            Messages::Update(update) => {
-                let name = &update.name;
-                state_signals2.update(&name, update.to_owned());
-            }
-        };
+
+        // Create WebSocket with custom message handler
         let UseWebSocketReturn {
             ready_state,
             send,
@@ -131,57 +121,79 @@ impl ServerSignalWebSocket {
         } = use_websocket_with_options::<Messages, Messages, JsonSerdeCodec>(
             url,
             UseWebSocketOptions::default()
-                .on_message(on_message_callback)
+                .on_message(Self::handle_message(state_signals.clone()))
                 .immediate(false),
         );
-        let ready_state2 = ready_state.clone();
-        let mut ws = Self {
-            ready_state,
+
+        let ws_client = Self {
+            ready_state: ready_state.clone(),
             send: Arc::new(send),
-            state_signals,
             delayed_msgs,
         };
+        // Start Websocket
         open();
-        let ws2 = ws.clone();
-        provide_context(ws.state_signals.clone());
+
+        // Provide ClientSignals for Child Components to work
+        provide_context(state_signals);
+
+        Self::setup_delayed_message_processor(&ws_client, ready_state);
+
+        ws_client
+    }
+
+    fn handle_message(state_signals: ClientSignals) -> impl Fn(&Messages) {
+        move |msg: &Messages| match msg {
+            Messages::Establish(_) => todo!(),
+            Messages::EstablishResponse((name, value)) => {
+                state_signals.set_json(name, value.to_owned());
+            }
+            Messages::Update(update) => {
+                state_signals.update(&update.name, update.to_owned());
+            }
+        }
+    }
+
+    fn setup_delayed_message_processor(
+        ws_client: &Self,
+        ready_state: Signal<ConnectionReadyState>,
+    ) {
+        let ws_clone = ws_client.clone();
         Effect::new(move |_| {
-            if ready_state2.get() == ConnectionReadyState::Open {
-                if let Ok(mut delayed_msgs) = ws2.delayed_msgs.lock() {
-                    let messages = delayed_msgs.clone();
-                    delayed_msgs.clear();
-                    drop(delayed_msgs);
-                    for msg in messages.iter() {
-                        if let Err(err) = ws2.send(&msg) {
-                            eprintln!("Failed to send delayed message: {:?}", err);
-                        }
-                    }
-                }
+            if ready_state.get() == ConnectionReadyState::Open {
+                Self::process_delayed_messages(&ws_clone);
             }
         });
-        ws
+    }
+
+    fn process_delayed_messages(ws: &Self) {
+        let messages = {
+            let mut delayed_msgs = ws.delayed_msgs.lock().expect("Failed to lock delayed_msgs");
+            delayed_msgs.drain(..).collect::<Vec<_>>()
+        };
+
+        for msg in messages {
+            if let Err(err) = ws.send(&msg) {
+                eprintln!("Failed to send delayed message: {:?}", err);
+            }
+        }
     }
 }
 
 #[cfg(not(feature = "ssr"))]
 #[inline]
-fn provide_websocket_inner(url: &str) -> Result<(), Error> {
-    use error::Error;
+fn provide_websocket_inner(url: &str) -> Option<()> {
     use leptos::prelude::{provide_context, use_context};
-    use leptos_use::{use_websocket_with_options, UseWebSocketOptions, UseWebSocketReturn};
-    use prelude::warn;
 
     if let None = use_context::<ServerSignalWebSocket>() {
         provide_context(ServerSignalWebSocket::new(url));
-        return Ok(());
-    } else {
-        return Ok(());
     }
+    Some(())
 }
 
 #[cfg(feature = "ssr")]
 #[inline]
-fn provide_websocket_inner(_url: &str) -> Result<(), Error> {
-    Ok(())
+fn provide_websocket_inner(_url: &str) -> Option<()> {
+    None
 }
 /// Establishes and provides a WebSocket connection for server signals.
 ///
@@ -196,9 +208,8 @@ fn provide_websocket_inner(_url: &str) -> Result<(), Error> {
 /// # Returns
 ///
 /// Returns a `Result` which is:
-/// - `Ok(Some(WebSocket))` if the connection is successfully established (client-side only).
-/// - `Ok(None)` if running in SSR mode.
-/// - `Err(JsValue)` if there's an error establishing the connection.
+/// - `Some(())` if the connection is successfully established (client-side only).
+/// - `None` if running in SSR mode.
 ///
 /// # Features
 ///
@@ -208,7 +219,7 @@ fn provide_websocket_inner(_url: &str) -> Result<(), Error> {
 ///   - Provides context for `ServerSignalWebSocket` and `ClientSignals`.
 ///
 /// - When the "ssr" feature is enabled (server-side):
-///   - Returns `Ok(None)` without establishing a connection.
+///   - Returns `None` without establishing a connection.
 ///
 /// # Examples
 ///
@@ -228,6 +239,6 @@ fn provide_websocket_inner(_url: &str) -> Result<(), Error> {
 ///
 /// This function should be called in the root component of your Leptos application
 /// to ensure the WebSocket connection is available throughout the app.
-pub fn provide_websocket(url: &str) -> Result<(), Error> {
+pub fn provide_websocket(url: &str) -> Option<()> {
     provide_websocket_inner(url)
 }
