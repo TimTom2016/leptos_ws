@@ -45,20 +45,20 @@ impl ClientSignals {
             Err(Error::AddingSignalFailed)
         }
     }
-    pub fn get_signal<T: Clone + 'static>(&mut self, name: String) -> Option<T> {
+    pub fn get_signal<T: Clone + 'static>(&mut self, name: &str) -> Option<T> {
         self.signals
             .write()
             .unwrap()
-            .get_mut(&name)
+            .get_mut(name)
             .map(|value| value.as_any().downcast_ref::<T>().unwrap().clone())
     }
 
-    pub fn update(&self, name: String, patch: ServerSignalUpdate) -> Option<Result<(), Error>> {
+    pub fn update(&self, name: &str, patch: ServerSignalUpdate) -> Option<Result<(), Error>> {
         match self
             .signals
             .write()
             .unwrap()
-            .get_mut(&name)
+            .get_mut(name)
             .map(|value| value.update_json(patch))
         {
             Some(fut) => Some(fut),
@@ -66,24 +66,24 @@ impl ClientSignals {
         }
     }
 
-    pub fn json(&self, name: String) -> Option<Result<Value, Error>> {
+    pub fn json(&self, name: &str) -> Option<Result<Value, Error>> {
         match self
             .signals
             .write()
             .unwrap()
-            .get_mut(&name)
+            .get_mut(name)
             .map(|value| value.json())
         {
             Some(res) => Some(res),
             None => None,
         }
     }
-    pub fn set_json(&self, name: String, new_value: Value) -> Option<Result<(), Error>> {
+    pub fn set_json(&self, name: &str, new_value: Value) -> Option<Result<(), Error>> {
         match self
             .signals
             .write()
             .unwrap()
-            .get_mut(&name)
+            .get_mut(name)
             .map(|value| value.set_json(new_value))
         {
             Some(res) => Some(res),

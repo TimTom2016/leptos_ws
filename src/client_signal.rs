@@ -78,7 +78,7 @@ where
         let mut signals: ClientSignals =
             use_context::<ClientSignals>().ok_or(Error::MissingServerSignals)?;
         if signals.contains(&name) {
-            return Ok(signals.get_signal::<ClientSignal<T>>(name).unwrap());
+            return Ok(signals.get_signal::<ClientSignal<T>>(&name).unwrap());
         }
         let new_signal = Self {
             value: ArcRwSignal::new(value.clone()),

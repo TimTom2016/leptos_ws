@@ -4,13 +4,16 @@
 use crate::client_signal::ClientSignal;
 #[cfg(not(feature = "ssr"))]
 use client_signals::ClientSignals;
+use codee::string::JsonSerdeCodec;
+use error::Error;
+use leptos::prelude::*;
 use leptos::*;
+use leptos_use::core::ConnectionReadyState;
 #[cfg(not(feature = "ssr"))]
 use messages::Messages;
+
 #[cfg(not(feature = "ssr"))]
 use std::sync::{Arc, Mutex};
-use wasm_bindgen::JsValue;
-use web_sys::WebSocket;
 
 pub mod error;
 pub mod messages;
@@ -87,110 +90,94 @@ pub type ServerSignal<T> = ClientSignal<T>;
 #[cfg(not(feature = "ssr"))]
 #[derive(Clone)]
 struct ServerSignalWebSocket {
-    ws: send_wrapper::SendWrapper<WebSocket>,
-    // References to these are kept by the closure for the callback
-    // onmessage callback on the websocket
+    send: Option<Arc<dyn Fn(&Messages) + Send + Sync + 'static>>,
+    ready_state: Signal<ConnectionReadyState>,
     state_signals: ClientSignals,
-    // When the websocket is first established, the leptos may not have
-    // completed the traversal that sets up all of the state signals.
-    // Without that, we don't have a base state to apply the patches to,
-    // and therefore we must keep a record of the patches to apply after
-    // the state has been set up.
     delayed_msgs: Arc<Mutex<Vec<Messages>>>,
 }
 #[cfg(not(feature = "ssr"))]
 impl ServerSignalWebSocket {
-    /// Returns the inner websocket.
-    pub fn ws(&self) -> WebSocket {
-        self.ws.clone().take()
-    }
     pub fn send(&self, msg: &Messages) -> Result<(), serde_json::Error> {
-        let serialized_msg = serde_json::to_string(&msg)?;
-        if self.ws.ready_state() != WebSocket::OPEN {
+        if self.ready_state.get() != ConnectionReadyState::Open {
             self.delayed_msgs.lock().unwrap().push(msg.clone());
         } else {
-            self.ws
-                .send_with_str(&serialized_msg)
-                .expect("Failed to send message");
+            (self.send.as_ref().unwrap())(&msg);
         }
         Ok(())
+    }
+    pub fn new(url: &str) -> Self {
+        use leptos::prelude::{provide_context, use_context};
+        use leptos_use::{use_websocket_with_options, UseWebSocketOptions, UseWebSocketReturn};
+        use prelude::warn;
+
+        let delayed_msgs = Arc::default();
+        let state_signals = ClientSignals::new();
+        let mut ws = Self {
+            ready_state: signal(ConnectionReadyState::Closed).0.into(),
+            send: None,
+            state_signals,
+            delayed_msgs,
+        };
+        let ws2 = ws.clone();
+        let ws3 = ws.clone();
+        let onopen_callback = move |_| {
+            if let Ok(mut delayed_msgs) = ws2.delayed_msgs.lock() {
+                let mut messages = delayed_msgs.clone();
+                delayed_msgs.clear();
+                drop(delayed_msgs);
+                for msg in messages.iter() {
+                    if let Err(err) = ws2.send(&msg) {
+                        eprintln!("Failed to send delayed message: {:?}", err);
+                    }
+                }
+            }
+        };
+        let on_message_callback = move |msg: &Messages| match msg {
+            Messages::Establish(_) => todo!(),
+            Messages::EstablishResponse((name, value)) => {
+                ws3.state_signals.set_json(name, value.to_owned());
+            }
+            Messages::Update(update) => {
+                let name = &update.name;
+                ws3.state_signals.update(&name, update.to_owned());
+            }
+        };
+        let UseWebSocketReturn {
+            ready_state, send, ..
+        } = use_websocket_with_options::<Messages, Messages, JsonSerdeCodec>(
+            url,
+            UseWebSocketOptions::default()
+                .on_open(onopen_callback)
+                .on_message(on_message_callback),
+        );
+        ws.ready_state = ready_state;
+        ws.send = Some(Arc::new(send));
+        provide_context(ws.state_signals.clone());
+
+        ws
     }
 }
 
 #[cfg(not(feature = "ssr"))]
 #[inline]
-fn provide_websocket_inner(url: &str) -> Result<Option<WebSocket>, JsValue> {
+fn provide_websocket_inner(url: &str) -> Result<(), Error> {
+    use error::Error;
     use leptos::prelude::{provide_context, use_context};
+    use leptos_use::{use_websocket_with_options, UseWebSocketOptions, UseWebSocketReturn};
     use prelude::warn;
-    use wasm_bindgen::{prelude::Closure, JsCast};
-    use web_sys::js_sys::{Function, JsString};
-    use web_sys::MessageEvent;
 
     if let None = use_context::<ServerSignalWebSocket>() {
-        let ws = send_wrapper::SendWrapper::new(WebSocket::new(url)?);
-        ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
-        provide_context(ServerSignalWebSocket {
-            ws,
-            state_signals: ClientSignals::new(),
-            delayed_msgs: Arc::default(),
-        });
-    }
-
-    match use_context::<ServerSignalWebSocket>() {
-        Some(ws) => {
-            let handlers = ws.state_signals.clone();
-            provide_context(ws.state_signals.clone());
-
-            let callback = Closure::wrap(Box::new(move |event: MessageEvent| {
-                let ws_string = event
-                    .data()
-                    .dyn_into::<JsString>()
-                    .unwrap()
-                    .as_string()
-                    .unwrap();
-
-                match serde_json::from_str::<Messages>(&ws_string) {
-                    Ok(Messages::Establish(_)) => todo!(),
-                    Ok(Messages::EstablishResponse((name, value))) => {
-                        handlers.set_json(name, value);
-                    }
-                    Ok(Messages::Update(update)) => {
-                        let name = &update.name;
-                        handlers.update(name.to_string(), update);
-                    }
-                    Err(err) => {
-                        warn!("Couldn't deserialize Socket Message {}", err)
-                    }
-                }
-            }) as Box<dyn FnMut(_)>);
-            let ws2 = ws.clone();
-            let onopen_callback = Closure::<dyn FnMut()>::new(move || {
-                if let Ok(mut delayed_msgs) = ws2.delayed_msgs.lock() {
-                    for msg in delayed_msgs.drain(..) {
-                        if let Err(err) = ws2.send(&msg) {
-                            eprintln!("Failed to send delayed message: {:?}", err);
-                        }
-                    }
-                }
-            });
-            let function: &Function = callback.as_ref().unchecked_ref();
-            ws.ws.set_onmessage(Some(function));
-            ws.ws
-                .set_onopen(Some(onopen_callback.as_ref().unchecked_ref()));
-            onopen_callback.forget();
-            // Keep the closure alive for the lifetime of the program
-            callback.forget();
-
-            Ok(Some(ws.ws()))
-        }
-        None => todo!(),
+        provide_context(ServerSignalWebSocket::new(url));
+        return Ok(());
+    } else {
+        return Ok(());
     }
 }
 
 #[cfg(feature = "ssr")]
 #[inline]
-fn provide_websocket_inner(_url: &str) -> Result<Option<WebSocket>, JsValue> {
-    Ok(None)
+fn provide_websocket_inner(_url: &str) -> Result<(), Error> {
+    Ok(())
 }
 /// Establishes and provides a WebSocket connection for server signals.
 ///
@@ -237,6 +224,6 @@ fn provide_websocket_inner(_url: &str) -> Result<Option<WebSocket>, JsValue> {
 ///
 /// This function should be called in the root component of your Leptos application
 /// to ensure the WebSocket connection is available throughout the app.
-pub fn provide_websocket(url: &str) -> Result<Option<WebSocket>, JsValue> {
+pub fn provide_websocket(url: &str) -> Result<(), Error> {
     provide_websocket_inner(url)
 }

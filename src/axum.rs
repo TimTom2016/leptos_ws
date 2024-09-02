@@ -126,6 +126,5 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, server_signals: Ser
             }
         }
     })
-    .await
-    .unwrap();
+    .await;
 }

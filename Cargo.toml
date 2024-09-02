@@ -31,11 +31,9 @@ axum = { version = "0.7", default-features = false, features = [
     "ws",
 ], optional = true }
 futures = { version = "0.3", default-features = false, optional = true }
-
-wasm-bindgen = { version = "0.2", default-features = false }
-web-sys = { version = "0.3", features = ["WebSocket", "MessageEvent"] }
-send_wrapper = "0.6.0"
+codee = { version = "0.2", features = ["json_serde"]}
 tokio = { version = "1.38.0", optional = true, features = ["rt-multi-thread"] }
+leptos-use = { version = "0.14.0-beta",default-features = false, features = ["use_websocket"] }
 
 [features]
 default = []
