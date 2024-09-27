@@ -1,5 +1,6 @@
 #[cfg(feature = "ssr")]
 pub mod fileserv;
+pub mod messages;
 #[cfg(feature = "ssr")]
 use crate::fileserv::file_and_error_handler;
 #[cfg(feature = "ssr")]
@@ -47,6 +48,10 @@ pub struct AppState {
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
+    use std::{net::SocketAddr, sync::Arc, time::Duration};
+    use tokio::time::sleep;
+    use tower_governor::{governor::GovernorConfigBuilder, GovernorLayer};
+
     pub fn shell(options: LeptosOptions) -> impl IntoView {
         view! {
             <!DOCTYPE html>
@@ -54,6 +59,7 @@ async fn main() {
                 <head>
                     <meta charset="utf-8"/>
                     <meta name="viewport" content="width=device-width, initial-scale=1"/>
+                    <link rel="stylesheet" href="pkg/axum_example.css"/>
                     <AutoReload options=options.clone()/>
                     <HydrationScripts options=options islands=true/>
                 </head>
@@ -64,17 +70,18 @@ async fn main() {
         }
     }
 
-    async fn leptos_routes_handler(State(state): State<AppState>, req: Request) -> AxumResponse {
-        let options2 = state.options.clone();
+    async fn leptos_routes_handler(state: State<AppState>, req: Request) -> AxumResponse {
+        let state1 = state.0.clone();
+        let options2 = state.clone().0.options.clone();
         let handler = leptos_axum::render_route_with_context(
             state.routes.clone().unwrap(),
             move || {
-                provide_context(state.options.clone());
-                provide_context(state.server_signals.clone());
+                provide_context(state1.options.clone());
+                provide_context(state1.server_signals.clone());
             },
             move || shell(options2.clone()),
         );
-        handler(req).await.into_response()
+        handler(state, req).await.into_response()
     }
     async fn server_fn_handler(
         State(state): State<AppState>,
@@ -92,9 +99,25 @@ async fn main() {
         )
         .await
     }
+    let governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(2)
+            .burst_size(5)
+            .finish()
+            .unwrap(),
+    );
 
+    let governor_limiter = governor_conf.limiter().clone();
+    let interval = Duration::from_secs(60);
+    // a separate background task to clean up
+    tokio::spawn(async move {
+        loop {
+            sleep(interval).await;
+            governor_limiter.retain_recent();
+        }
+    });
     simple_logger::init_with_level(log::Level::Debug).expect("couldn't initialize logging");
-    let server_signals = provide_server_signals();
+    let server_signals = ServerSignals::new();
     //let signal = ServerSignal::new("counter".to_string(), 1);
     // build our application with a route
     let conf = get_configuration(None).unwrap();
@@ -119,6 +142,9 @@ async fn main() {
     state.routes = Some(routes.clone());
     let app = Router::new()
         .route("/api/*fn_name", post(server_fn_handler))
+        .layer(GovernorLayer {
+            config: governor_conf,
+        })
         .route(
             "/ws",
             get(leptos_ws::axum::websocket(state.server_signals.clone())),
@@ -130,9 +156,12 @@ async fn main() {
     // `axum::Server` is a re-export of `hyper::Server`
     leptos::logging::log!("listening on http://{}", &addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app.into_make_service())
-        .await
-        .unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
 
 #[cfg(not(feature = "ssr"))]

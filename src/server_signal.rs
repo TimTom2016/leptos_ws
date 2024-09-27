@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::ops::{Deref, DerefMut};
+use std::panic::Location;
 use std::sync::Arc;
 
 use crate::error::Error;
@@ -7,6 +8,7 @@ use crate::messages::ServerSignalUpdate;
 use crate::server_signals::ServerSignals;
 use axum::async_trait;
 use futures::executor::block_on;
+use guards::{Plain, ReadGuard};
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -19,6 +21,7 @@ pub struct ServerSignal<T>
 where
     T: Clone + Send + Sync + for<'de> Deserialize<'de>,
 {
+    initial: T,
     name: String,
     value: ArcRwSignal<T>,
     json_value: Arc<RwLock<Value>>,
@@ -95,6 +98,7 @@ where
         }
         let (send, _) = channel(32);
         let new_signal = ServerSignal {
+            initial: value.clone(),
             name: name.clone(),
             value: ArcRwSignal::new(value.clone()),
             json_value: Arc::new(RwLock::new(serde_json::to_value(value)?)),
@@ -107,6 +111,23 @@ where
 
     pub fn subscribe(&self) -> Receiver<ServerSignalUpdate> {
         self.observers.subscribe()
+    }
+    fn check_is_hydrating(&self) -> bool {
+        #[cfg(not(feature = "ssr"))]
+        return false;
+        let owner = match Owner::current() {
+            Some(owner) => owner,
+            None => return false,
+        };
+        let shared_context = match owner.shared_context() {
+            Some(shared_context) => shared_context,
+            None => return false,
+        };
+        #[cfg(feature = "ssr")]
+        if shared_context.get_is_hydrating() || shared_context.during_hydration() == false {
+            return true;
+        }
+        false
     }
 }
 
@@ -128,6 +149,48 @@ where
             let _ = self.update_if_changed().await;
         });
         Some(val)
+    }
+}
+
+impl<T> DefinedAt for ServerSignal<T>
+where
+    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
+{
+    fn defined_at(&self) -> Option<&'static Location<'static>> {
+        self.value.defined_at()
+    }
+}
+
+impl<T> ReadUntracked for ServerSignal<T>
+where
+    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
+{
+    type Value = ReadGuard<T, Plain<T>>;
+
+    fn try_read_untracked(&self) -> Option<Self::Value> {
+        if self.check_is_hydrating() {
+            let guard: ReadGuard<T, Plain<T>> = ReadGuard::new(
+                Plain::try_new(Arc::new(std::sync::RwLock::new(self.initial.clone()))).unwrap(),
+            );
+            return Some(guard);
+        }
+
+        self.value.try_read_untracked()
+    }
+}
+
+impl<T> Get for ServerSignal<T>
+where
+    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
+{
+    type Value = T;
+
+    fn try_get(&self) -> Option<Self::Value> {
+        #[cfg(feature = "ssr")]
+        if self.check_is_hydrating() {
+            return Some(self.initial.clone());
+        }
+        self.value.try_get()
     }
 }
 

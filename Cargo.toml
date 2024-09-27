@@ -19,7 +19,7 @@ readme = "README.md"
 
 [dependencies]
 json-patch = "2.0.0"
-leptos = { version = "=0.7.0-beta4", default-features = false }
+leptos = { version = "0.7.0-beta", default-features = false }
 leptos-use = { version = "0.14.0-beta",default-features = false, features = ["use_websocket"] }
 
 

@@ -117,7 +117,13 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, server_signals: Ser
                         }
                     }
                     Message::Binary(_) => todo!(),
-                    Message::Ping(_) => todo!(),
+                    Message::Ping(_) => send
+                        .clone()
+                        .write()
+                        .await
+                        .send(Message::Pong(vec![1, 2, 3]))
+                        .await
+                        .unwrap(),
                     Message::Pong(_) => todo!(),
                     Message::Close(_) => {}
                 }
