@@ -7,18 +7,22 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-axum = { version = "0.7", optional = true, features = ["macros"]}
+axum = { version = "0.7", optional = true, features = ["macros"] }
 console_error_panic_hook = "0.1"
 console_log = "1"
 cfg-if = "1"
 futures = { version = "0.3.28", default-features = false, optional = true }
-leptos = { version = "0.7.0-beta"}
-leptos_axum = { version = "0.7.0-beta", optional = true }
+leptos = { version = "0.7.0-rc1" }
+leptos_axum = { version = "0.7.0-rc1", optional = true }
 leptos_ws = { path = "../.." }
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 simple_logger = "4"
-tokio = { version = "1.36", features = ["rt", "macros", "rt-multi-thread"], optional = true }
+tokio = { version = "1.36", features = [
+    "rt",
+    "macros",
+    "rt-multi-thread",
+], optional = true }
 tokio-stream = { version = "0.1.14", optional = true }
 tower = { version = "0.4", optional = true }
 tower-http = { version = "0.5", features = ["fs"], optional = true }
@@ -29,16 +33,16 @@ server_fn = "0.7.0-beta"
 [features]
 hydrate = ["leptos/hydrate"]
 ssr = [
-  "dep:axum",
-  "dep:futures",
-  "dep:tokio",
-  "dep:tokio-stream",
-  "dep:tower",
-  "dep:tower-http",
-  "dep:leptos_axum",
-  "leptos/ssr",
-  "leptos_ws/ssr",
-  "leptos_ws/axum",
+    "dep:axum",
+    "dep:futures",
+    "dep:tokio",
+    "dep:tokio-stream",
+    "dep:tower",
+    "dep:tower-http",
+    "dep:leptos_axum",
+    "leptos/ssr",
+    "leptos_ws/ssr",
+    "leptos_ws/axum",
 ]
 
 [package.metadata.cargo-all-features]
@@ -104,3 +108,6 @@ lib-features = ["hydrate"]
 #
 # Optional. Defaults to false.
 lib-default-features = false
+
+[package.metadata.bin]
+cargo-leptos = { version = "0.2.21" }

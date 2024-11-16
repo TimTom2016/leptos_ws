@@ -21,8 +21,6 @@ use config::get_configuration;
 #[cfg(feature = "ssr")]
 use http::HeaderMap;
 #[cfg(feature = "ssr")]
-use leptos::spawn::Executor;
-#[cfg(feature = "ssr")]
 use leptos::*;
 #[cfg(feature = "ssr")]
 use leptos::{
@@ -64,17 +62,18 @@ async fn main() {
         }
     }
 
-    async fn leptos_routes_handler(State(state): State<AppState>, req: Request) -> AxumResponse {
-        let options2 = state.options.clone();
+    async fn leptos_routes_handler(state: State<AppState>, req: Request) -> AxumResponse {
+        let state1 = state.0.clone();
+        let options2 = state.clone().0.options.clone();
         let handler = leptos_axum::render_route_with_context(
             state.routes.clone().unwrap(),
             move || {
-                provide_context(state.options.clone());
-                provide_context(state.server_signals.clone());
+                provide_context(state1.options.clone());
+                provide_context(state1.server_signals.clone());
             },
             move || shell(options2.clone()),
         );
-        handler(req).await.into_response()
+        handler(state, req).await.into_response()
     }
     async fn server_fn_handler(
         State(state): State<AppState>,
@@ -92,7 +91,6 @@ async fn main() {
         )
         .await
     }
-    let _ = Executor::init_tokio();
 
     simple_logger::init_with_level(log::Level::Debug).expect("couldn't initialize logging");
     let server_signals = ServerSignals::new();
