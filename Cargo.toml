@@ -1,6 +1,6 @@
 [package]
 name = "leptos_ws"
-version = "0.7.0-beta5"
+version = "0.7.0-rc1"
 edition = "2021"
 license = "MIT"
 authors = ["Tim Persigehl <dev@timtom2016.com>"]
