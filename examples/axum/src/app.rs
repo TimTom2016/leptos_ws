@@ -1,4 +1,5 @@
-use leptos::{prelude::*, spawn::spawn_local};
+use leptos::prelude::*;
+use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct HistoryEntry {

@@ -3,6 +3,6 @@
 Example of using server signals with axum.
 
 ```console
-$ cd examples/axum-example
+$ cd examples/axum
 $ cargo leptos serve
 ```

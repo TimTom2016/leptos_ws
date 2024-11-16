@@ -8,6 +8,7 @@ use codee::string::JsonSerdeCodec;
 use leptos::prelude::*;
 #[cfg(not(feature = "ssr"))]
 use leptos_use::core::ConnectionReadyState;
+use leptos_use::ReconnectLimit;
 #[cfg(not(feature = "ssr"))]
 use leptos_use::{use_websocket_with_options, UseWebSocketOptions, UseWebSocketReturn};
 #[cfg(not(feature = "ssr"))]
@@ -122,6 +123,12 @@ impl ServerSignalWebSocket {
             url,
             UseWebSocketOptions::default()
                 .on_message(Self::handle_message(state_signals.clone()))
+                .on_open({
+                    let signals = state_signals.clone();
+                    move |_| {
+                        signals.reconnect();
+                    }
+                })
                 .immediate(false),
         );
 

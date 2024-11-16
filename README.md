@@ -17,7 +17,7 @@ Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-leptos_ws = "0.7.0-beta4"
+leptos_ws = "0.7.0-rc1"
 serde = { version = "1.0", features = ["derive"] }
 
 [features]
@@ -29,7 +29,7 @@ ssr = ["leptos_ws/ssr", "leptos_ws/axum"]
 ### Client-side
 
 ```rust
-use leptos::*;
+use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[component]

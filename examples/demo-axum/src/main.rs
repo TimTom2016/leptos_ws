@@ -22,8 +22,6 @@ use config::get_configuration;
 #[cfg(feature = "ssr")]
 use http::HeaderMap;
 #[cfg(feature = "ssr")]
-use leptos::spawn::Executor;
-#[cfg(feature = "ssr")]
 use leptos::*;
 #[cfg(feature = "ssr")]
 use leptos::{
