@@ -45,6 +45,21 @@ impl ClientSignals {
             Err(Error::AddingSignalFailed)
         }
     }
+
+    pub fn reconnect(&self) -> Result<(), Error> {
+        let ws = use_context::<ServerSignalWebSocket>().ok_or(Error::MissingServerSignals)?;
+
+        // Get all signal names from the signals HashMap
+        let signal_names: Vec<String> = self.signals.read().unwrap().keys().cloned().collect();
+
+        // Resend establish message for each signal
+        for name in signal_names {
+            ws.send(&Messages::Establish(name))?;
+        }
+
+        Ok(())
+    }
+
     pub fn get_signal<T: Clone + 'static>(&mut self, name: &str) -> Option<T> {
         self.signals
             .write()
