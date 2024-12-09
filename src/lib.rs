@@ -2,6 +2,7 @@
 #![feature(unboxed_closures)]
 #[cfg(not(feature = "ssr"))]
 use crate::client_signal::ClientSignal;
+use crate::messages::ServerSignalMessage;
 #[cfg(not(feature = "ssr"))]
 use client_signals::ClientSignals;
 use codee::string::JsonSerdeCodec;
@@ -13,7 +14,6 @@ use leptos_use::ReconnectLimit;
 use leptos_use::{use_websocket_with_options, UseWebSocketOptions, UseWebSocketReturn};
 #[cfg(not(feature = "ssr"))]
 use messages::Messages;
-
 #[cfg(not(feature = "ssr"))]
 use std::sync::{Arc, Mutex};
 
@@ -112,7 +112,7 @@ impl ServerSignalWebSocket {
     pub fn new(url: &str) -> Self {
         let delayed_msgs = Arc::default();
         let state_signals = ClientSignals::new();
-
+        let initial_connection = create_rw_signal(true);
         // Create WebSocket with custom message handler
         let UseWebSocketReturn {
             ready_state,
@@ -126,7 +126,11 @@ impl ServerSignalWebSocket {
                 .on_open({
                     let signals = state_signals.clone();
                     move |_| {
-                        signals.reconnect();
+                        // Only reconnect if this is not the initial connection
+                        if !initial_connection.get() {
+                            signals.reconnect().ok();
+                        }
+                        initial_connection.set(false);
                     }
                 })
                 .immediate(false),
@@ -150,13 +154,17 @@ impl ServerSignalWebSocket {
 
     fn handle_message(state_signals: ClientSignals) -> impl Fn(&Messages) {
         move |msg: &Messages| match msg {
-            Messages::Establish(_) => todo!(),
-            Messages::EstablishResponse((name, value)) => {
-                state_signals.set_json(name, value.to_owned());
-            }
-            Messages::Update(update) => {
-                state_signals.update(&update.name, update.to_owned());
-            }
+            Messages::ServerSignal(server_msg) => match server_msg {
+                ServerSignalMessage::Establish(_) => {
+                    // Usually client-to-server message, ignore if received
+                }
+                ServerSignalMessage::EstablishResponse((name, value)) => {
+                    state_signals.set_json(name, value.to_owned());
+                }
+                ServerSignalMessage::Update(update) => {
+                    state_signals.update(&update.name, update.to_owned());
+                }
+            },
         }
     }
 

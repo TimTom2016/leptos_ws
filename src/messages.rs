@@ -4,8 +4,17 @@ use json_patch::Patch;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Messages {
+    ServerSignal(ServerSignalMessage),
+    // Hier können weitere Nachrichtentypen hinzugefügt werden
+    // ChatMessage(ChatMessage),
+    // StateSync(StateSyncMessage),
+    // etc.
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub enum ServerSignalMessage {
     Establish(String),
     EstablishResponse((String, Value)),
     Update(ServerSignalUpdate),

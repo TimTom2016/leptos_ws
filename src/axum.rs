@@ -1,4 +1,7 @@
-use crate::{messages::Messages, messages::ServerSignalUpdate, server_signals::ServerSignals};
+use crate::{
+    messages::{Messages, ServerSignalMessage, ServerSignalUpdate},
+    server_signals::ServerSignals,
+};
 use axum::extract::ws::Message;
 use futures::{future::BoxFuture, stream::SplitSink, SinkExt, StreamExt};
 use leptos::logging::error;
@@ -17,7 +20,10 @@ async fn handle_broadcasts(
             .write()
             .await
             .send(Message::Text(
-                serde_json::to_string(&Messages::Update(message)).unwrap(),
+                serde_json::to_string(&Messages::ServerSignal(ServerSignalMessage::Update(
+                    message,
+                )))
+                .unwrap(),
             ))
             .await
             .is_err()
@@ -81,39 +87,44 @@ pub fn websocket(
 async fn handle_socket(socket: axum::extract::ws::WebSocket, server_signals: ServerSignals) {
     let (send, mut recv) = socket.split();
     let send = Arc::new(RwLock::new(send));
-    spawn(async move {
+    let _ = spawn(async move {
         while let Some(message) = recv.next().await {
             if let Ok(msg) = message {
                 match msg {
                     Message::Text(text) => {
-                        let message: Messages = serde_json::from_str(&text).unwrap();
-                        match message {
-                            Messages::Establish(name) => {
-                                let recv = server_signals.add_observer(name.clone()).await.unwrap();
-                                send.clone()
-                                    .write()
-                                    .await
-                                    .send(Message::Text(
-                                        serde_json::to_string(&Messages::EstablishResponse((
-                                            name.clone(),
-                                            server_signals
-                                                .json(name.clone())
-                                                .await
-                                                .unwrap()
+                        if let Ok(message) = serde_json::from_str::<Messages>(&text) {
+                            match message {
+                                Messages::ServerSignal(server_msg) => match server_msg {
+                                    ServerSignalMessage::Establish(name) => {
+                                        let recv = server_signals
+                                            .add_observer(name.clone())
+                                            .await
+                                            .unwrap();
+                                        send.clone()
+                                            .write()
+                                            .await
+                                            .send(Message::Text(
+                                                serde_json::to_string(&Messages::ServerSignal(
+                                                    ServerSignalMessage::EstablishResponse((
+                                                        name.clone(),
+                                                        server_signals
+                                                            .json(name.clone())
+                                                            .await
+                                                            .unwrap()
+                                                            .unwrap(),
+                                                    )),
+                                                ))
                                                 .unwrap(),
-                                        )))
-                                        .unwrap(),
-                                    ))
-                                    .await
-                                    .unwrap();
-                                spawn(handle_broadcasts(recv, send.clone()));
+                                            ))
+                                            .await
+                                            .unwrap();
+                                        spawn(handle_broadcasts(recv, send.clone()));
+                                    }
+                                    _ => error!("Unexpected server signal message from client"),
+                                },
                             }
-                            Messages::Update(_) => {
-                                error!("You can't change the server signal from the client side")
-                            }
-                            Messages::EstablishResponse(_) => {
-                                error!("You can't change the server signal from the client side")
-                            }
+                        } else {
+                            leptos::logging::error!("Error transmitting message")
                         }
                     }
                     Message::Binary(_) => todo!(),
