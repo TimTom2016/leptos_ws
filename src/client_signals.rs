@@ -5,6 +5,7 @@ use std::{
 
 use crate::client_signal::ClientSignalTrait;
 use crate::messages::Messages;
+use crate::ServerSignalMessage;
 use crate::ServerSignalWebSocket;
 use crate::{error::Error, messages::ServerSignalUpdate};
 use leptos::prelude::*;
@@ -39,7 +40,10 @@ impl ClientSignals {
             .map(|value| value.as_any().downcast_ref::<T>().unwrap().clone())
             .is_none()
         {
-            ws.send(&Messages::Establish(name.clone())).unwrap();
+            // Wrap the Establish message in ServerSignalMessage and Messages
+            ws.send(&Messages::ServerSignal(ServerSignalMessage::Establish(
+                name.clone(),
+            )))?;
             Ok(())
         } else {
             Err(Error::AddingSignalFailed)
@@ -54,7 +58,9 @@ impl ClientSignals {
 
         // Resend establish message for each signal
         for name in signal_names {
-            ws.send(&Messages::Establish(name))?;
+            ws.send(&Messages::ServerSignal(ServerSignalMessage::Establish(
+                name,
+            )))?;
         }
 
         Ok(())

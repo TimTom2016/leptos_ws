@@ -12,8 +12,8 @@ console_error_panic_hook = "0.1"
 console_log = "1"
 cfg-if = "1"
 futures = { version = "0.3.28", default-features = false, optional = true }
-leptos = { version = "0.7.0-rc1" }
-leptos_axum = { version = "=0.7.0-rc1", optional = true }
+leptos = { version = "0.7.0" }
+leptos_axum = { version = "=0.7.0", optional = true }
 leptos_ws = { path = "../.." }
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
@@ -26,7 +26,7 @@ tokio = { version = "1.36", features = [
 tokio-stream = { version = "0.1.14", optional = true }
 tower = { version = "0.4", optional = true }
 tower-http = { version = "0.5", features = ["fs"], optional = true }
-wasm-bindgen = "0.2"
+wasm-bindgen = "=0.2.96"
 http = "1.0"
 server_fn = "0.7.0-beta"
 tower_governor = { version = "0.4.2", optional = true }
