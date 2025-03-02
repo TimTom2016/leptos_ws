@@ -9,7 +9,6 @@ use codee::string::JsonSerdeCodec;
 use leptos::prelude::*;
 #[cfg(not(feature = "ssr"))]
 use leptos_use::core::ConnectionReadyState;
-use leptos_use::ReconnectLimit;
 #[cfg(not(feature = "ssr"))]
 use leptos_use::{use_websocket_with_options, UseWebSocketOptions, UseWebSocketReturn};
 #[cfg(not(feature = "ssr"))]
@@ -112,14 +111,14 @@ impl ServerSignalWebSocket {
     pub fn new(url: &str) -> Self {
         let delayed_msgs = Arc::default();
         let state_signals = ClientSignals::new();
-        let initial_connection = create_rw_signal(true);
+        let initial_connection = RwSignal::new(true);
         // Create WebSocket with custom message handler
         let UseWebSocketReturn {
             ready_state,
             send,
             open,
             ..
-        } = use_websocket_with_options::<Messages, Messages, JsonSerdeCodec>(
+        } = use_websocket_with_options::<Messages, Messages, JsonSerdeCodec,_, _>(
             url,
             UseWebSocketOptions::default()
                 .on_message(Self::handle_message(state_signals.clone()))
@@ -197,7 +196,6 @@ impl ServerSignalWebSocket {
 #[cfg(not(feature = "ssr"))]
 #[inline]
 fn provide_websocket_inner(url: &str) -> Option<()> {
-    use leptos::prelude::{provide_context, use_context};
 
     if let None = use_context::<ServerSignalWebSocket>() {
         provide_context(ServerSignalWebSocket::new(url));

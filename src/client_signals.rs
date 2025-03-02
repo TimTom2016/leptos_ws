@@ -87,18 +87,6 @@ impl ClientSignals {
         }
     }
 
-    pub fn json(&self, name: &str) -> Option<Result<Value, Error>> {
-        match self
-            .signals
-            .write()
-            .unwrap()
-            .get_mut(name)
-            .map(|value| value.json())
-        {
-            Some(res) => Some(res),
-            None => None,
-        }
-    }
     pub fn set_json(&self, name: &str, new_value: Value) -> Option<Result<(), Error>> {
         match self
             .signals

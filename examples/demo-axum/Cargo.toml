@@ -12,24 +12,24 @@ console_error_panic_hook = "0.1"
 console_log = "1"
 cfg-if = "1"
 futures = { version = "0.3.28", default-features = false, optional = true }
-leptos = { version = "0.7.0" }
-leptos_axum = { version = "=0.7.0", optional = true }
+leptos = { version = "0.7.7" }
+leptos_axum = { version = "=0.7.7", optional = true }
 leptos_ws = { path = "../.." }
 log = "0.4"
 serde = { version = "1.0", features = ["derive"] }
-simple_logger = "4"
+simple_logger = "5.0"
 tokio = { version = "1.36", features = [
     "rt",
     "macros",
     "rt-multi-thread",
 ], optional = true }
 tokio-stream = { version = "0.1.14", optional = true }
-tower = { version = "0.4", optional = true }
-tower-http = { version = "0.5", features = ["fs"], optional = true }
-wasm-bindgen = "=0.2.96"
+tower = { version = "0.5", optional = true }
+tower-http = { version = "0.6", features = ["fs"], optional = true }
+wasm-bindgen = "=0.2.100"
 http = "1.0"
 server_fn = "0.7.0-beta"
-tower_governor = { version = "0.4.2", optional = true }
+tower_governor = { version = "0.5", optional = true }
 
 [features]
 hydrate = ["leptos/hydrate"]
@@ -112,5 +112,5 @@ lib-features = ["hydrate"]
 lib-default-features = false
 
 [package.metadata.bin]
-cargo-binstall = { version = "1.10.2" }
-cargo-leptos = { version = "0.2.21" }
+cargo-binstall = { version = "1.11.2" }
+cargo-leptos = { version = "0.2.29" }
