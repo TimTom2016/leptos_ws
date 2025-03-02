@@ -4,13 +4,11 @@ use async_trait::async_trait;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::mpsc::{channel, Receiver, Sender};
 use std::{
     any::Any,
     ops::{Deref, DerefMut},
     sync::{Arc, RwLock},
 };
-use thiserror::Error;
 
 #[derive(Clone, Debug)]
 pub struct ClientSignal<T>
@@ -25,9 +23,9 @@ where
 pub trait ClientSignalTrait {
     fn as_any(&self) -> &dyn Any;
     fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error>;
-    fn json(&self) -> Result<Value, Error>;
+    // fn json(&self) -> Result<Value, Error>;
     fn set_json(&self, new_value: Value) -> Result<(), Error>;
-    fn track(&self);
+    // fn track(&self);
 }
 impl<T> ClientSignalTrait for ClientSignal<T>
 where
@@ -38,9 +36,9 @@ where
     }
 
     #[track_caller]
-    fn track(&self) {
-        self.value.track()
-    }
+    // fn track(&self) {
+    //     self.value.track()
+    // }
 
     fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error> {
         let mut writer = self
@@ -55,9 +53,9 @@ where
             Err(Error::UpdateSignalFailed)
         }
     }
-    fn json(&self) -> Result<Value, Error> {
-        Ok(serde_json::to_value(self.value.get())?)
-    }
+    // fn json(&self) -> Result<Value, Error> {
+    //     Ok(serde_json::to_value(self.value.get())?)
+    // }
     fn set_json(&self, new_value: Value) -> Result<(), Error> {
         let mut writer = self
             .json_value
