@@ -118,7 +118,7 @@ impl ServerSignalWebSocket {
             send,
             open,
             ..
-        } = use_websocket_with_options::<Messages, Messages, JsonSerdeCodec>(
+        } = use_websocket_with_options::<Messages, Messages, JsonSerdeCodec,_, _>(
             url,
             UseWebSocketOptions::default()
                 .on_message(Self::handle_message(state_signals.clone()))
@@ -196,7 +196,6 @@ impl ServerSignalWebSocket {
 #[cfg(not(feature = "ssr"))]
 #[inline]
 fn provide_websocket_inner(url: &str) -> Option<()> {
-    use leptos::prelude::{provide_context, use_context};
 
     if let None = use_context::<ServerSignalWebSocket>() {
         provide_context(ServerSignalWebSocket::new(url));

@@ -26,13 +26,13 @@ pub fn App() -> impl IntoView {
     view! {
         <button on:click=move |_| {
             spawn_local(async move {
-                update_count().await;
+                update_count().await.unwrap();
             });
         }>Start Counter</button>
         <h1>"Count: " {count}</h1>
         <button on:click=move |_| {
             spawn_local(async move {
-                update_history().await;
+             let _ = update_history().await.unwrap();
             });
         }>Start History Changes</button>
         <p>{move || format!("history: {:?}",history.get())}</p>

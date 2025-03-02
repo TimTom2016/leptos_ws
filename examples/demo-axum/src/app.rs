@@ -1,6 +1,5 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
-use serde::{Deserialize, Serialize};
 
 use crate::messages::{Message, Messages};
 
@@ -45,14 +44,14 @@ pub fn App() -> impl IntoView {
                     } on:keypress=move|e| {
                         if e.key() == "Enter" {
                             spawn_local(async move {
-                                add_message(new_message.get_untracked()).await;
+                                let _ = add_message(new_message.get_untracked()).await;
                                 new_message.set("".to_string());
                             });
                         }
                     }></input>
                 </div>
                 <button on:click=move |_| spawn_local(async move {
-                    add_message(new_message.get_untracked()).await;
+                    let _ = add_message(new_message.get_untracked()).await;
                     new_message.set("".to_string());
                 })>Send</button>
             </div>
