@@ -17,7 +17,7 @@ Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-leptos_ws = "0.7.7"
+leptos_ws = "0.7.8"
 serde = { version = "1.0", features = ["derive"] }
 
 [features]
