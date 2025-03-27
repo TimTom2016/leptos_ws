@@ -1,6 +1,6 @@
 [package]
 name = "leptos_ws"
-version = "0.7.7"
+version = "0.7.8"
 edition = "2021"
 license = "MIT"
 authors = ["Tim Persigehl <dev@timtom2016.com>"]
@@ -19,7 +19,7 @@ readme = "README.md"
 
 [dependencies]
 json-patch = "4.0.0"
-leptos = { version = "0.7.7", default-features = false }
+leptos = { version = "0.7.8", default-features = false }
 leptos-use = { version = "0.15.6", default-features = false, features = [
     "use_websocket",
 ] }
@@ -34,7 +34,7 @@ axum = { version = "0.7", default-features = false, features = [
     "ws",
 ], optional = true }
 futures = { version = "0.3", default-features = false, optional = true }
-codee = { version = "0.2", features = ["json_serde"] }
+codee = { version = "0.3", features = ["json_serde"] }
 tokio = { version = "1.38.0", optional = true, features = ["rt-multi-thread"] }
 
 [features]
