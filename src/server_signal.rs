@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::error::Error;
 use crate::messages::ServerSignalUpdate;
 use crate::server_signals::ServerSignals;
-use axum::async_trait;
+use async_trait::async_trait;
 use futures::executor::block_on;
 use guards::{Plain, ReadGuard};
 use leptos::prelude::*;

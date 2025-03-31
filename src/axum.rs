@@ -23,7 +23,8 @@ async fn handle_broadcasts(
                 serde_json::to_string(&Messages::ServerSignal(ServerSignalMessage::Update(
                     message,
                 )))
-                .unwrap(),
+                .unwrap()
+                .into(),
             ))
             .await
             .is_err()
@@ -114,7 +115,8 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, server_signals: Ser
                                                             .unwrap(),
                                                     )),
                                                 ))
-                                                .unwrap(),
+                                                .unwrap()
+                                                .into(),
                                             ))
                                             .await
                                             .unwrap();
@@ -132,7 +134,7 @@ async fn handle_socket(socket: axum::extract::ws::WebSocket, server_signals: Ser
                         .clone()
                         .write()
                         .await
-                        .send(Message::Pong(vec![1, 2, 3]))
+                        .send(Message::Pong(vec![1, 2, 3].into()))
                         .await
                         .unwrap(),
                     Message::Pong(_) => todo!(),

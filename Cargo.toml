@@ -19,8 +19,8 @@ readme = "README.md"
 
 [dependencies]
 json-patch = "4.0.0"
-leptos = { version = "0.7.8", default-features = false }
-leptos-use = { version = "0.15.6", default-features = false, features = [
+leptos = { version = "0.8.0-beta", default-features = false }
+leptos-use = { version = "0.16.0-beta", default-features = false, features = [
     "use_websocket",
 ] }
 
@@ -30,7 +30,7 @@ thiserror = { version = "2.0" }
 async-trait = "0.1"
 
 # Axum
-axum = { version = "0.7", default-features = false, features = [
+axum = { version = "0.8", default-features = false, features = [
     "ws",
 ], optional = true }
 futures = { version = "0.3", default-features = false, optional = true }
