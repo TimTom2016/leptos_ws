@@ -139,7 +139,7 @@ async fn main() {
     );
     state.routes = Some(routes.clone());
     let app = Router::new()
-        .route("/api/*fn_name", post(server_fn_handler))
+        .route("/api/{*fn_name}", post(server_fn_handler))
         .layer(GovernorLayer {
             config: governor_conf,
         })
