@@ -118,7 +118,7 @@ impl ServerSignalWebSocket {
             send,
             open,
             ..
-        } = use_websocket_with_options::<Messages, Messages, JsonSerdeCodec,_, _>(
+        } = use_websocket_with_options::<Messages, Messages, JsonSerdeCodec, _, _>(
             url,
             UseWebSocketOptions::default()
                 .on_message(Self::handle_message(state_signals.clone()))
@@ -196,7 +196,6 @@ impl ServerSignalWebSocket {
 #[cfg(not(feature = "ssr"))]
 #[inline]
 fn provide_websocket_inner(url: &str) -> Option<()> {
-
     if let None = use_context::<ServerSignalWebSocket>() {
         provide_context(ServerSignalWebSocket::new(url));
     }
@@ -240,7 +239,7 @@ fn provide_websocket_inner(_url: &str) -> Option<()> {
 /// use leptos_ws::provide_websocket;
 ///
 /// fn setup_websocket() {
-///     if let Ok(Some(_)) = provide_websocket("ws://example.com/socket") {
+///     if let Some(_) = provide_websocket("ws://example.com/socket") {
 ///         println!("WebSocket connection established");
 ///     } else {
 ///         println!("Running in SSR mode or connection failed");
