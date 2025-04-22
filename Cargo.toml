@@ -1,6 +1,6 @@
 [package]
 name = "leptos_ws"
-version = "0.8.0-beta"
+version = "0.8.0-rc2"
 edition = "2021"
 license = "MIT"
 authors = ["Tim Persigehl <dev@timtom2016.com>"]
@@ -19,7 +19,7 @@ readme = "README.md"
 
 [dependencies]
 json-patch = "4.0.0"
-leptos = { version = "0.8.0-beta", default-features = false }
+leptos = { version = "0.8.0-rc2", default-features = false }
 leptos-use = { version = "0.16.0-beta", default-features = false, features = [
     "use_websocket",
 ] }

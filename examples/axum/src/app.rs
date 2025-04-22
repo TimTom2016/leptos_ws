@@ -59,8 +59,8 @@ async fn update_history() -> Result<(), ServerFnError> {
     for i in 0..255 {
         history.update(move |value| {
             value.entries.push(HistoryEntry {
-                name: format!("{}", i).to_string(),
-                number: i as u16,
+                name: format!("{}", i*2).to_string(),
+                number: i*2+1 as u16,
             })
         });
         sleep(Duration::from_millis(1000)).await;
