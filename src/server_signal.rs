@@ -113,7 +113,7 @@ where
         self.observers.subscribe()
     }
     fn check_is_hydrating(&self) -> bool {
-        #[cfg(not(feature = "ssr"))]
+        #[cfg(any(feature = "csr", feature = "hydrate"))]
         return false;
         let owner = match Owner::current() {
             Some(owner) => owner,

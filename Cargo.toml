@@ -40,6 +40,8 @@ tokio = { version = "1.38.0", optional = true, features = ["rt-multi-thread"] }
 [features]
 default = []
 ssr = ["leptos/ssr", "dep:tokio", "dep:futures"]
+csr = ["leptos/csr",]
+hydrate = ["leptos/hydrate",]
 axum = ["dep:axum"]
 
 [package.metadata.docs.rs]

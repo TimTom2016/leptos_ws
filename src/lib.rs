@@ -1,19 +1,19 @@
 #![doc = include_str!("../README.md")]
 // #![feature(unboxed_closures)]
-#[cfg(not(feature = "ssr"))]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 use crate::client_signal::ClientSignal;
 use crate::messages::ServerSignalMessage;
-#[cfg(not(feature = "ssr"))]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 use client_signals::ClientSignals;
 use codee::string::JsonSerdeCodec;
 use leptos::prelude::*;
-#[cfg(not(feature = "ssr"))]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 use leptos_use::core::ConnectionReadyState;
-#[cfg(not(feature = "ssr"))]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 use leptos_use::{use_websocket_with_options, UseWebSocketOptions, UseWebSocketReturn};
-#[cfg(not(feature = "ssr"))]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 use messages::Messages;
-#[cfg(not(feature = "ssr"))]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 use std::sync::{Arc, Mutex};
 
 pub mod error;
@@ -24,10 +24,10 @@ mod server_signal;
 #[cfg(feature = "ssr")]
 pub mod server_signals;
 
-#[cfg(not(feature = "ssr"))]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 mod client_signal;
 
-#[cfg(not(feature = "ssr"))]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 mod client_signals;
 
 #[cfg(all(feature = "axum", feature = "ssr"))]
@@ -72,7 +72,7 @@ pub mod axum;
 ///
 /// On the client:
 /// ```rust,ignore
-/// #[cfg(not(feature = "ssr"))]
+/// #[cfg(any(feature = "csr", feature = "hydrate"))]
 /// fn use_server_signal() {
 ///     let counter = ServerSignal::<i32>::new("counter".to_string(), 0);
 ///     // Use `counter.get()` to read the current value
@@ -85,17 +85,17 @@ pub mod axum;
 /// using the `provide_websocket` function in your application's root component.
 #[cfg(feature = "ssr")]
 pub type ServerSignal<T> = server_signal::ServerSignal<T>;
-#[cfg(not(feature = "ssr"))]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 pub type ServerSignal<T> = ClientSignal<T>;
 
-#[cfg(not(feature = "ssr"))]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 #[derive(Clone)]
 struct ServerSignalWebSocket {
     send: Arc<dyn Fn(&Messages) + Send + Sync + 'static>,
     ready_state: Signal<ConnectionReadyState>,
     delayed_msgs: Arc<Mutex<Vec<Messages>>>,
 }
-#[cfg(not(feature = "ssr"))]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 impl ServerSignalWebSocket {
     pub fn send(&self, msg: &Messages) -> Result<(), serde_json::Error> {
         if self.ready_state.get() != ConnectionReadyState::Open {
@@ -193,7 +193,7 @@ impl ServerSignalWebSocket {
     }
 }
 
-#[cfg(not(feature = "ssr"))]
+#[cfg(any(feature = "csr", feature = "hydrate"))]
 #[inline]
 fn provide_websocket_inner(url: &str) -> Option<()> {
     if let None = use_context::<ServerSignalWebSocket>() {
