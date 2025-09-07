@@ -3,32 +3,26 @@
 #![warn(clippy::nursery)]
 
 // #![feature(unboxed_closures)]
-#[cfg(any(feature = "csr", feature = "hydrate"))]
-use crate::client_signal::ClientSignal;
 use crate::messages::ServerSignalMessage;
-#[cfg(any(feature = "csr", feature = "hydrate"))]
-use client_signals::ClientSignals;
 use leptos::{
     prelude::*,
     server_fn::{codec::JsonEncoding, BoxedStream, Websocket},
     task::spawn_local,
 };
-use messages::Messages;
+use messages::{BiDirectionalMessage, Messages};
+pub use read_only::ReadOnlySignal;
+
+use std::ops::Deref;
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 use std::sync::{Arc, Mutex};
+pub use ws_signals::WsSignals;
+mod bidirectional;
 pub mod error;
 pub mod messages;
-#[cfg(feature = "ssr")]
-mod server_signal;
+mod read_only;
+mod ws_signals;
 
-#[cfg(feature = "ssr")]
-pub mod server_signals;
-
-#[cfg(any(feature = "csr", feature = "hydrate"))]
-mod client_signal;
-
-#[cfg(any(feature = "csr", feature = "hydrate"))]
-mod client_signals;
+pub mod traits;
 
 /// A type alias for a signal that synchronizes with the server.
 ///
@@ -80,10 +74,6 @@ mod client_signals;
 ///
 /// When using `ServerSignal`, ensure that you've set up the WebSocket connection
 /// using the `provide_websocket` function in your application's root component.
-#[cfg(feature = "ssr")]
-pub type ServerSignal<T> = server_signal::ServerSignal<T>;
-#[cfg(any(feature = "csr", feature = "hydrate"))]
-pub type ServerSignal<T> = ClientSignal<T>;
 
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 #[derive(Clone)]
@@ -102,7 +92,7 @@ impl ServerSignalWebSocket {
         let (tx, rx) = mpsc::channel(32);
 
         let delayed_msgs = Arc::default();
-        let state_signals = ClientSignals::new();
+        let state_signals = WsSignals::new();
         spawn_local({
             let state_signals = state_signals.clone();
             async move {
@@ -125,7 +115,18 @@ impl ServerSignalWebSocket {
                                         state_signals.set_json(&name, value.to_owned());
                                     }
                                     ServerSignalMessage::Update(update) => {
-                                        state_signals.update(update.get_name(), update.to_owned());
+                                        spawn_local({
+                                            let state_signals = state_signals.clone();
+                                            async move {
+                                                state_signals
+                                                    .update(
+                                                        update.get_name(),
+                                                        update.to_owned(),
+                                                        None,
+                                                    )
+                                                    .await;
+                                            }
+                                        });
                                     }
                                 },
                             }
@@ -163,7 +164,8 @@ pub async fn leptos_ws_websocket(
     use futures::{channel::mpsc, SinkExt, StreamExt};
     let mut input = input;
     let (mut tx, rx) = mpsc::channel(1);
-    let server_signals = use_context::<crate::server_signals::ServerSignals>().unwrap();
+    let server_signals = use_context::<WsSignals>().unwrap();
+    let id = Arc::new(nanoid::nanoid!());
     // spawn a task to listen to the input stream of messages coming in over the websocket
     tokio::spawn(async move {
         while let Some(msg) = input.next().await {
@@ -173,18 +175,40 @@ pub async fn leptos_ws_websocket(
             match msg {
                 Messages::ServerSignal(server_msg) => match server_msg {
                     ServerSignalMessage::Establish(name) => {
-                        let recv = server_signals.add_observer(name.clone()).await.unwrap();
+                        let recv = server_signals.add_observer(&name).unwrap();
                         tx.send(Ok(Messages::ServerSignal(
                             ServerSignalMessage::EstablishResponse((
                                 name.clone(),
-                                server_signals.json(name.clone()).await.unwrap().unwrap(),
+                                server_signals.json(&name).unwrap().unwrap(),
                             )),
                         )))
                         .await
                         .unwrap();
-                        tokio::spawn(handle_broadcasts(recv, tx.clone()));
+                        tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
                     }
                     _ => leptos::logging::error!("Unexpected server signal message from client"),
+                },
+                Messages::BiDirectional(bidirectional) => match bidirectional {
+                    BiDirectionalMessage::Establish(name) => {
+                        let recv = server_signals.add_observer(&name).unwrap();
+                        tx.send(Ok(Messages::ServerSignal(
+                            ServerSignalMessage::EstablishResponse((
+                                name.clone(),
+                                server_signals.json(&name).unwrap().unwrap(),
+                            )),
+                        )))
+                        .await
+                        .unwrap();
+                        tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                    }
+                    BiDirectionalMessage::Update(update) => {
+                        server_signals.update(
+                            update.get_name(),
+                            update.to_owned(),
+                            Some(id.to_string()),
+                        );
+                    }
+                    _ => leptos::logging::error!("Unexpected bi-directional message from client"),
                 },
             }
         }
@@ -197,17 +221,21 @@ use futures::{
     SinkExt, StreamExt,
 };
 #[cfg(feature = "ssr")]
-use messages::ServerSignalUpdate;
+use messages::SignalUpdate;
 
 #[cfg(feature = "ssr")]
 async fn handle_broadcasts(
-    mut receiver: tokio::sync::broadcast::Receiver<ServerSignalUpdate>,
+    id: String,
+    mut receiver: tokio::sync::broadcast::Receiver<(Option<String>, SignalUpdate)>,
     mut sink: Sender<Result<Messages, ServerFnError>>,
 ) {
     while let Ok(message) = receiver.recv().await {
+        if message.0.is_some_and(|v| id == v) {
+            continue;
+        }
         if sink
             .send(Ok(Messages::ServerSignal(ServerSignalMessage::Update(
-                message,
+                message.1,
             ))))
             .await
             .is_err()

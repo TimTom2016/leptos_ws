@@ -9,6 +9,9 @@ pub enum Error {
     #[error("Could not update Signal")]
     UpdateSignalFailed,
 
+    #[error("Method not available on Signal")]
+    NotAvailableOnSignal,
+
     #[error(transparent)]
     SerializationFailed(#[from] serde_json::Error),
 }
