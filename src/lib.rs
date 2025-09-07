@@ -1,16 +1,14 @@
 #![doc = include_str!("../README.md")]
+#![warn(clippy::pedantic)]
+#![warn(clippy::nursery)]
+
 // #![feature(unboxed_closures)]
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 use crate::client_signal::ClientSignal;
 use crate::messages::ServerSignalMessage;
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 use client_signals::ClientSignals;
-use codee::string::JsonSerdeCodec;
-use leptos::{
-    prelude::*,
-    server_fn::{codec::JsonEncoding, BoxedStream, Websocket},
-    task::spawn_local,
-};
+use leptos::{prelude::*, server_fn::BoxedStream, task::spawn_local};
 use messages::Messages;
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 use std::sync::{Arc, Mutex};
@@ -77,7 +75,7 @@ type WebsocketFn = Box<
 /// ```rust,ignore
 /// #[cfg(feature = "ssr")]
 /// fn create_server_signal() -> ServerSignal<i32> {
-///     ServerSignal::new("counter".to_string(), 0)
+///     ServerSignal::new("counter", 0)
 /// }
 /// ```
 ///
@@ -85,7 +83,7 @@ type WebsocketFn = Box<
 /// ```rust,ignore
 /// #[cfg(any(feature = "csr", feature = "hydrate"))]
 /// fn use_server_signal() {
-///     let counter = ServerSignal::<i32>::new("counter".to_string(), 0);
+///     let counter = ServerSignal::<i32>::new("counter", 0);
 ///     // Use `counter.get()` to read the current value
 /// }
 /// ```
@@ -146,7 +144,7 @@ impl ServerSignalWebSocket {
                                         state_signals.set_json(&name, value.to_owned());
                                     }
                                     ServerSignalMessage::Update(update) => {
-                                        state_signals.update(&update.name, update.to_owned());
+                                        state_signals.update(update.get_name(), update.to_owned());
                                     }
                                 },
                             }
@@ -193,7 +191,6 @@ pub async fn leptos_ws_websocket_inner(
     let server_signals = use_context::<crate::server_signals::ServerSignals>().unwrap();
     // spawn a task to listen to the input stream of messages coming in over the websocket
     tokio::spawn(async move {
-        let mut x = 0;
         while let Some(msg) = input.next().await {
             let Ok(msg) = msg else {
                 break;
@@ -221,7 +218,7 @@ pub async fn leptos_ws_websocket_inner(
     Ok(rx.into())
 }
 use futures::{
-    channel::mpsc::{self, Receiver, Sender},
+    channel::mpsc::{self, Sender},
     SinkExt, StreamExt,
 };
 #[cfg(feature = "ssr")]
@@ -232,8 +229,6 @@ async fn handle_broadcasts(
     mut receiver: tokio::sync::broadcast::Receiver<ServerSignalUpdate>,
     mut sink: Sender<Result<Messages, ServerFnError>>,
 ) {
-    use futures::{SinkExt, StreamExt};
-
     while let Ok(message) = receiver.recv().await {
         if sink
             .send(Ok(Messages::ServerSignal(ServerSignalMessage::Update(
@@ -266,7 +261,7 @@ where
 ///
 /// # Arguments
 ///
-/// * `url` - A string slice that holds the URL of the WebSocket server to connect to.
+/// * `websocket_fn` - A function that takes a boxed stream of messages and returns a future.
 ///
 /// # Returns
 ///
@@ -288,9 +283,14 @@ where
 ///
 /// ```rust
 /// use leptos_ws::provide_websocket;
-///
+/// #[server(protocol = Websocket<JsonEncoding, JsonEncoding>,endpoint="leptos_ws_websocket")]
+/// async fn leptos_ws_websocket(
+///     input: BoxedStream<Messages, ServerFnError>,
+/// ) -> Result<BoxedStream<Messages, ServerFnError>, ServerFnError> {
+///     leptos_ws::leptos_ws_websocket_inner(input).await
+/// }
 /// fn setup_websocket() {
-///     if let Some(_) = provide_websocket("ws://example.com/socket") {
+///     if let Some(_) = provide_websocket(Box::new(leptos_ws_websocket)) {
 ///         println!("WebSocket connection established");
 ///     } else {
 ///         println!("Running in SSR mode or connection failed");

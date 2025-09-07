@@ -1,34 +1,28 @@
 use crate::{error::Error, messages::ServerSignalUpdate, server_signal::ServerSignalTrait};
-use leptos::prelude::*;
+use dashmap::DashMap;
 use serde_json::Value;
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{broadcast::Receiver, RwLock};
+use std::sync::Arc;
+use tokio::sync::broadcast::Receiver;
 
 #[derive(Clone)]
 pub struct ServerSignals {
-    signals: Arc<RwLock<HashMap<String, Arc<Box<dyn ServerSignalTrait + Send + Sync>>>>>,
+    signals: Arc<DashMap<String, Arc<Box<dyn ServerSignalTrait + Send + Sync>>>>,
 }
 
 impl ServerSignals {
     pub fn new() -> Self {
-        let signals = Arc::new(RwLock::new(HashMap::new()));
+        let signals = Arc::new(DashMap::new());
         let me = Self { signals };
         me
     }
 
-    pub async fn create_signal<T: Clone + Send + Sync + 'static>(
-        &mut self,
-        name: String,
-        value: T,
-    ) -> Result<(), Error>
+    pub async fn create_signal<T>(&mut self, name: &str, value: T) -> Result<(), Error>
     where
-        T: ServerSignalTrait,
+        T: ServerSignalTrait + Clone + Send + Sync + 'static,
     {
         if self
             .signals
-            .write()
-            .await
-            .insert(name, Arc::new(Box::new(value)))
+            .insert(name.to_owned(), Arc::new(Box::new(value)))
             .map(|value| value.as_any().downcast_ref::<T>().unwrap().clone())
             .is_none()
         {
@@ -37,35 +31,21 @@ impl ServerSignals {
             Err(Error::AddingSignalFailed)
         }
     }
-    pub async fn get_signal<T: Clone + 'static>(&mut self, name: String) -> Option<T> {
+    pub async fn get_signal<T: Clone + 'static>(&mut self, name: &str) -> Option<T> {
         self.signals
-            .write()
-            .await
-            .get_mut(&name)
+            .get_mut(name)
             .map(|value| value.as_any().downcast_ref::<T>().unwrap().clone())
     }
     pub async fn add_observer(&self, name: String) -> Option<Receiver<ServerSignalUpdate>> {
-        match self
-            .signals
-            .read()
-            .await
-            .get(&name)
-            .map(|value| value.add_observer())
-        {
-            Some(fut) => Some(fut.await),
+        match self.signals.get(&name) {
+            Some(value) => Some(value.add_observer().await),
             None => None,
         }
     }
 
     pub async fn json(&self, name: String) -> Option<Result<Value, Error>> {
-        match self
-            .signals
-            .read()
-            .await
-            .get(&name)
-            .map(|value| value.json())
-        {
-            Some(res) => Some(res),
+        match self.signals.get(&name) {
+            Some(value) => Some(value.json()),
             None => None,
         }
     }
@@ -74,19 +54,13 @@ impl ServerSignals {
         name: String,
         patch: ServerSignalUpdate,
     ) -> Option<Result<(), Error>> {
-        match self
-            .signals
-            .write()
-            .await
-            .get_mut(&name)
-            .map(|value| value.update_json(patch))
-        {
-            Some(fut) => Some(fut.await),
+        match self.signals.get_mut(&name) {
+            Some(value) => Some(value.update_json(patch).await),
             None => None,
         }
     }
 
     pub async fn contains(&self, name: &str) -> bool {
-        self.signals.read().await.contains_key(name)
+        self.signals.contains_key(name)
     }
 }

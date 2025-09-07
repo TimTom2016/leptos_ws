@@ -22,8 +22,8 @@ pub enum ServerSignalMessage {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerSignalUpdate {
-    pub(crate) name: Cow<'static, str>,
-    pub(crate) patch: Patch,
+    name: Cow<'static, str>,
+    patch: Patch,
 }
 
 impl ServerSignalUpdate {
@@ -52,5 +52,13 @@ impl ServerSignalUpdate {
             name: name.into(),
             patch,
         }
+    }
+
+    pub(crate) fn get_patch(&self) -> &Patch {
+        &self.patch
+    }
+
+    pub(crate) fn get_name(&self) -> &Cow<'static, str> {
+        &self.name
     }
 }

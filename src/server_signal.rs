@@ -48,7 +48,7 @@ where
 
     async fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error> {
         let mut writer = self.json_value.write().await;
-        if json_patch::patch(writer.deref_mut(), &patch.patch).is_ok() {
+        if json_patch::patch(writer.deref_mut(), patch.get_patch()).is_ok() {
             //*self.value.write() = serde_json::from_value(writer.clone())?;
             let _ = self.observers.send(patch);
             Ok(())
@@ -91,7 +91,7 @@ impl<T> ServerSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
-    pub fn new(name: String, value: T) -> Result<Self, Error> {
+    pub fn new(name: &str, value: T) -> Result<Self, Error> {
         let mut signals = use_context::<ServerSignals>().ok_or(Error::MissingServerSignals)?;
         if block_on(signals.contains(&name)) {
             return Ok(block_on(signals.get_signal::<ServerSignal<T>>(name)).unwrap());
@@ -99,7 +99,7 @@ where
         let (send, _) = channel(32);
         let new_signal = ServerSignal {
             initial: value.clone(),
-            name: name.clone(),
+            name: name.to_owned(),
             value: ArcRwSignal::new(value.clone()),
             json_value: Arc::new(RwLock::new(serde_json::to_value(value)?)),
             observers: Arc::new(send),
@@ -113,20 +113,19 @@ where
         self.observers.subscribe()
     }
     fn check_is_hydrating(&self) -> bool {
-        #[cfg(any(feature = "csr", feature = "hydrate"))]
-        return false;
-        let owner = match Owner::current() {
-            Some(owner) => owner,
-            None => return false,
-        };
-        let shared_context = match owner.shared_context() {
-            Some(shared_context) => shared_context,
-            None => return false,
-        };
         #[cfg(feature = "ssr")]
-        if shared_context.get_is_hydrating() || shared_context.during_hydration() == false {
-            return true;
+        {
+            let owner = match Owner::current() {
+                Some(owner) => owner,
+                None => return false,
+            };
+            let shared_context = match owner.shared_context() {
+                Some(shared_context) => shared_context,
+                None => return false,
+            };
+            return shared_context.get_is_hydrating() || !shared_context.during_hydration();
         }
+
         false
     }
 }
@@ -142,7 +141,6 @@ where
         let (did_update, val) = fun(&mut *lock);
         if !did_update {
             lock.untrack();
-        } else {
         }
         drop(lock);
         block_on(async move {
@@ -204,143 +202,3 @@ where
         &self.value
     }
 }
-
-// impl<T> SignalGet for ServerSignal<T>
-// where
-//     T: 'static + Clone + SignalGet+ SignalSet + SignalWith + SignalUpdate,
-// {
-//     type Value = <T as SignalGet>::Value;
-//     #[inline(always)]
-//     fn get(&self) -> Self::Value {
-//         self.value.get()
-//     }
-//     #[inline(always)]
-//     fn try_get(&self) -> Option<Self::Value> {
-//         self.value.try_get()
-//     }
-// }
-
-// impl<T> SignalSet for ServerSignal<T>
-// where
-//     T: 'static + Clone + SignalGet+ SignalSet + SignalWith + SignalUpdate,
-
-// {
-//     type Value = <T as SignalSet>::Value;
-
-//     #[inline(always)]
-//     fn set(&self, new_value: Self::Value) {
-//         self.value.set(new_value)
-//     }
-//     #[inline(always)]
-//     fn try_set(&self, new_value: Self::Value) -> Option<Self::Value> {
-//         self.value.try_set(new_value)
-//     }
-// }
-
-// impl<T> SignalUpdate for ServerSignal<T>
-// where
-//     T: 'static + Clone + SignalGet+ SignalSet + SignalWith + SignalUpdate,
-// {
-//     type Value = <T as SignalUpdate>::Value;
-
-//     #[inline(always)]
-//     fn update(&self, f: impl FnOnce(&mut Self::Value)) {
-//         self.value.update(f)
-//     }
-
-//     #[inline(always)]
-//     fn try_update<O>(&self, f: impl FnOnce(&mut Self::Value) -> O)
-//         -> Option<O> {
-//         self.value.try_update(f)
-//     }
-// }
-
-// impl<T> SignalWith for ServerSignal<T>
-// where
-//     T: 'static + Clone + SignalGet+ SignalSet + SignalWith + SignalUpdate,
-// {
-//     type Value=<T as SignalWith>::Value;
-//     #[inline(always)]
-//     fn with<O>(&self, f: impl FnOnce(&Self::Value) -> O) -> O {
-//         self.value.with(f)
-//     }
-//     #[inline(always)]
-//     fn try_with<O>(&self, f: impl FnOnce(&Self::Value) -> O) -> Option<O> {
-//         self.value.try_with(f)
-//     }
-// }
-
-// impl<T> ServerSignal<T>
-// {
-//     /// Creates a new [`ServerSignal`], initializing `T` to default.
-//     ///
-//     /// This function can fail if serilization of `T` fails.
-//     pub fn new() -> Result<Self, serde_json::Error>
-//     where
-//         T: Default + Serialize,
-//     {
-//         let signals = expect_context::<ServerSignals>();
-//         Ok(ServerSignal {
-//             value: T::default(),
-//             json_value: serde_json::to_value(T::default())?,
-//         })
-//     }
-
-//     /// Modifies the signal in a closure, and sends the json diffs through the websocket connection after modifying.
-//     ///
-//     /// The same websocket connection should be used for a given client, otherwise the signal could become out of sync.
-//     ///
-//     /// # Example
-//     ///
-//     /// ```ignore
-//     /// let count = ServerSignal::new("counter").unwrap();
-//     /// count.with(&mut websocket, |count| {
-//     ///     count.value += 1;
-//     /// }).await?;
-//     /// ```
-//     pub async fn with<'e, O, S>(
-//         &'e mut self,
-//         sink: &mut S,
-//         f: impl FnOnce(&mut T) -> O,
-//     ) -> Result<O, Error>
-//     where
-//         T: Clone + Serialize + 'static,
-//         S: Sink<Message> + Unpin,
-//         axum::Error: From<<S as Sink<Message>>::Error>,
-//     {
-//         let output = f(&mut self.value);
-//         let new_json = serde_json::to_value(self.value.clone())?;
-//         let update =
-//             ServerSignalUpdate::new_from_json::<T>(type_name::<T>(), &self.json_value, &new_json);
-//         let update_json = serde_json::to_string(&update)?;
-//         sink.send(Message::Text(update_json))
-//             .await
-//             .map_err(|err| Error::WebSocket(err.into()))?;
-//         self.json_value = new_json;
-//         Ok(output)
-//     }
-
-//     /// Consumes the [`ServerSignal`], returning the inner value.
-//     pub fn into_value(self) -> T {
-//         self.value
-//     }
-
-//     /// Consumes the [`ServerSignal`], returning the inner json value.
-//     pub fn into_json_value(self) -> Value {
-//         self.json_value
-//     }
-// }
-
-// impl<T> ops::Deref for ServerSignal<T> {
-//     type Target = T;
-
-//     fn deref(&self) -> &Self::Target {
-//         &self.value
-//     }
-// }
-
-// impl<T> AsRef<T> for ServerSignal<T> {
-//     fn as_ref(&self) -> &T {
-//         &self.value
-//     }
-// }
