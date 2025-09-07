@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use leptos::server_fn::{codec::JsonEncoding, BoxedStream, Websocket};
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -15,7 +16,7 @@ pub struct History {
 #[component]
 pub fn App() -> impl IntoView {
     // Provide websocket connection
-    leptos_ws::provide_websocket("ws://localhost:3000/ws");
+    leptos_ws::provide_websocket(Box::new(leptos_ws_websocket));
     let count = leptos_ws::ServerSignal::new("count".to_string(), 0 as i32).unwrap();
 
     let history =
@@ -49,6 +50,13 @@ async fn update_count() -> Result<(), ServerFnError> {
     }
     Ok(())
 }
+use leptos_ws::messages::Messages;
+#[server(protocol = Websocket<JsonEncoding, JsonEncoding>,endpoint="leptos_ws_websocket")]
+async fn leptos_ws_websocket(
+    input: BoxedStream<Messages, ServerFnError>,
+) -> Result<BoxedStream<Messages, ServerFnError>, ServerFnError> {
+    leptos_ws::leptos_ws_websocket_inner(input).await
+}
 
 #[server]
 async fn update_history() -> Result<(), ServerFnError> {
@@ -59,8 +67,8 @@ async fn update_history() -> Result<(), ServerFnError> {
     for i in 0..255 {
         history.update(move |value| {
             value.entries.push(HistoryEntry {
-                name: format!("{}", i*2).to_string(),
-                number: i*2+1 as u16,
+                name: format!("{}", i * 2).to_string(),
+                number: i * 2 + 1 as u16,
             })
         });
         sleep(Duration::from_millis(1000)).await;

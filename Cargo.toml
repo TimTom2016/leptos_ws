@@ -20,29 +20,20 @@ readme = "README.md"
 [dependencies]
 json-patch = "4.0.0"
 leptos = { version = "0.8.0", default-features = false }
-leptos-use = { version = "0.16.0-beta", default-features = false, features = [
-    "use_websocket",
-] }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = { version = "2.0" }
 async-trait = "0.1"
 
-# Axum
-axum = { version = "0.8", default-features = false, features = [
-    "ws",
-], optional = true }
-futures = { version = "0.3", default-features = false, optional = true }
-codee = { version = "0.3", features = ["json_serde"] }
-tokio = { version = "1.38.0", optional = true, features = ["rt-multi-thread"] }
+futures = { version = "0.3", default-features = false}
+tokio = { version = "1.38.0", optional = true, features = ["rt-multi-thread","sync"] }
 
 [features]
 default = []
-ssr = ["leptos/ssr", "dep:tokio", "dep:futures"]
+ssr = ["leptos/ssr", "dep:tokio"]
 csr = ["leptos/csr",]
 hydrate = ["leptos/hydrate",]
-axum = ["dep:axum"]
 
 [package.metadata.docs.rs]
 all-features = true
