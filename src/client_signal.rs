@@ -34,13 +34,12 @@ where
     }
 
     #[track_caller]
-
     fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error> {
         let mut writer = self
             .json_value
             .write()
             .map_err(|_| Error::UpdateSignalFailed)?;
-        if json_patch::patch(writer.deref_mut(), &patch.patch).is_ok() {
+        if json_patch::patch(writer.deref_mut(), patch.get_patch()).is_ok() {
             *self.value.write() = serde_json::from_value(writer.clone())
                 .map_err(|err| Error::SerializationFailed(err))?;
             Ok(())
@@ -64,7 +63,7 @@ impl<T> ClientSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
-    pub fn new(name: String, value: T) -> Result<Self, Error> {
+    pub fn new(name: &str, value: T) -> Result<Self, Error> {
         let mut signals: ClientSignals =
             use_context::<ClientSignals>().ok_or(Error::MissingServerSignals)?;
         if signals.contains(&name) {

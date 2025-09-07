@@ -17,10 +17,11 @@ Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-leptos_ws = "0.7.8"
+leptos_ws = "0.9.0"
 serde = { version = "1.0", features = ["derive"] }
 
 [features]
+hydrate = ["leptos_ws/hydrate"]
 ssr = ["leptos_ws/ssr", "leptos_ws/axum"]
 ```
 
@@ -35,10 +36,10 @@ use serde::{Deserialize, Serialize};
 #[component]
 pub fn App() -> impl IntoView {
     // Connect to WebSocket
-    leptos_ws::provide_websocket("http://localhost:3000/ws");
+    leptos_ws::provide_websocket();
 
     // Create server signal
-    let count = leptos_ws::ServerSignal::new("count".to_string(), 0 as i32).unwrap();
+    let count = leptos_ws::ServerSignal::new("count", 0 as i32).unwrap();
 
     view! {
         <h1>"Count: " {move || count.get().to_string()}</h1>
@@ -53,7 +54,8 @@ Server-side implementation requires additional setup. Refer to the example for d
 ## Feature Flags
 
 - `ssr`: Enable server-side rendering support.
-- `axum`: Enable integration with the Axum web framework.
+- `hydrate`: Enable hydration support.
+- `csr`: Enable client-side rendering support.
 
 ## Documentation
 
