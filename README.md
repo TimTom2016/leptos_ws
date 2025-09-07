@@ -33,17 +33,10 @@ ssr = ["leptos_ws/ssr", "leptos_ws/axum"]
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 
-async fn leptos_ws_websocket(
-    input: BoxedStream<Messages, ServerFnError>,
-) -> Result<BoxedStream<Messages, ServerFnError>, ServerFnError> {
-    leptos_ws::leptos_ws_websocket_inner(input).await
-}
-
-
 #[component]
 pub fn App() -> impl IntoView {
     // Connect to WebSocket
-    leptos_ws::provide_websocket(Box::new(leptos_ws_websocket));
+    leptos_ws::provide_websocket();
 
     // Create server signal
     let count = leptos_ws::ServerSignal::new("count", 0 as i32).unwrap();

@@ -8,7 +8,11 @@ use crate::client_signal::ClientSignal;
 use crate::messages::ServerSignalMessage;
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 use client_signals::ClientSignals;
-use leptos::{prelude::*, server_fn::BoxedStream, task::spawn_local};
+use leptos::{
+    prelude::*,
+    server_fn::{codec::JsonEncoding, BoxedStream, Websocket},
+    task::spawn_local,
+};
 use messages::Messages;
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 use std::sync::{Arc, Mutex};
@@ -28,19 +32,6 @@ mod client_signals;
 
 use std::future::Future;
 use std::pin::Pin;
-
-// Type alias for the websocket function signature
-type WebsocketFn = Box<
-    dyn Fn(
-            BoxedStream<Messages, ServerFnError>,
-        ) -> Pin<
-            Box<
-                dyn Future<Output = Result<BoxedStream<Messages, ServerFnError>, ServerFnError>>
-                    + Send,
-            >,
-        > + Send
-        + 'static,
->;
 
 /// A type alias for a signal that synchronizes with the server.
 ///
@@ -65,7 +56,7 @@ type WebsocketFn = Box<
 ///   `ServerSignal<T>` is an alias for `server_signal::ServerSignal<T>`, which is the
 ///   server-side implementation capable of sending updates to connected clients.
 ///
-/// - When the "ssr" feature is not enabled (client-side):
+/// - When the "hydrate" feature is enabled (client-side):
 ///   `ServerSignal<T>` is an alias for `ClientSignal<T>`, which is the client-side
 ///   implementation that receives updates from the server.
 ///
@@ -110,14 +101,7 @@ impl ServerSignalWebSocket {
         send.try_send(Ok(msg.to_owned()));
         Ok(())
     }
-    pub fn new<F, Fut>(websocket_fn: F) -> Self
-    where
-        F: Fn(BoxedStream<Messages, ServerFnError>) -> Fut + Clone + Send + Sync + 'static,
-        Fut: std::future::Future<
-                Output = Result<BoxedStream<Messages, ServerFnError>, ServerFnError>,
-            > + Send
-            + 'static,
-    {
+    pub fn new() -> Self {
         let (tx, rx) = mpsc::channel(32);
 
         let delayed_msgs = Arc::default();
@@ -125,7 +109,7 @@ impl ServerSignalWebSocket {
         spawn_local({
             let state_signals = state_signals.clone();
             async move {
-                match websocket_fn(rx.into()).await {
+                match leptos_ws_websocket(rx.into()).await {
                     Ok(mut messages) => {
                         while let Some(msg) = messages.next().await {
                             let Ok(msg) = msg else {
@@ -169,20 +153,14 @@ impl ServerSignalWebSocket {
 
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 #[inline]
-fn provide_websocket_inner<F, Fut>(websocket_fn: F) -> Option<()>
-where
-    F: Fn(BoxedStream<Messages, ServerFnError>) -> Fut + Clone + Send + Sync + 'static,
-    Fut: std::future::Future<Output = Result<BoxedStream<Messages, ServerFnError>, ServerFnError>>
-        + Send
-        + 'static,
-{
+fn provide_websocket_inner() -> Option<()> {
     if let None = use_context::<ServerSignalWebSocket>() {
-        provide_context(ServerSignalWebSocket::new(Box::new(websocket_fn)));
+        provide_context(ServerSignalWebSocket::new());
     }
     Some(())
 }
-#[cfg(feature = "ssr")]
-pub async fn leptos_ws_websocket_inner(
+#[server(protocol = Websocket<JsonEncoding, JsonEncoding>,endpoint="leptos_ws_websocket")]
+pub async fn leptos_ws_websocket(
     input: BoxedStream<Messages, ServerFnError>,
 ) -> Result<BoxedStream<Messages, ServerFnError>, ServerFnError> {
     use futures::{channel::mpsc, SinkExt, StreamExt};
@@ -244,24 +222,14 @@ async fn handle_broadcasts(
 
 #[cfg(feature = "ssr")]
 #[inline]
-fn provide_websocket_inner<F, Fut>(websocket_fn: F) -> Option<()>
-where
-    F: Fn(BoxedStream<Messages, ServerFnError>) -> Fut + Clone + Send + Sync + 'static,
-    Fut: std::future::Future<Output = Result<BoxedStream<Messages, ServerFnError>, ServerFnError>>
-        + Send
-        + 'static,
-{
+fn provide_websocket_inner() -> Option<()> {
     None
 }
 /// Establishes and provides a WebSocket connection for server signals.
 ///
 /// This function sets up a WebSocket connection to the specified URL and provides
 /// the necessary context for handling server signals. It's designed to work differently
-/// based on whether server-side rendering (SSR) is enabled or not.
-///
-/// # Arguments
-///
-/// * `websocket_fn` - A function that takes a boxed stream of messages and returns a future.
+/// based on whether server-side rendering (SSR) is enabled or the "hydrate" feature is enabled.
 ///
 /// # Returns
 ///
@@ -271,7 +239,7 @@ where
 ///
 /// # Features
 ///
-/// - When the "ssr" feature is not enabled (client-side):
+/// - When the "hydrate" feature is enabled (client-side):
 ///   - Creates a new WebSocket connection.
 ///   - Sets up message handling for server signals.
 ///   - Provides context for `ServerSignalWebSocket` and `ClientSignals`.
@@ -283,14 +251,8 @@ where
 ///
 /// ```rust
 /// use leptos_ws::provide_websocket;
-/// #[server(protocol = Websocket<JsonEncoding, JsonEncoding>,endpoint="leptos_ws_websocket")]
-/// async fn leptos_ws_websocket(
-///     input: BoxedStream<Messages, ServerFnError>,
-/// ) -> Result<BoxedStream<Messages, ServerFnError>, ServerFnError> {
-///     leptos_ws::leptos_ws_websocket_inner(input).await
-/// }
 /// fn setup_websocket() {
-///     if let Some(_) = provide_websocket(Box::new(leptos_ws_websocket)) {
+///     if let Some(_) = provide_websocket() {
 ///         println!("WebSocket connection established");
 ///     } else {
 ///         println!("Running in SSR mode or connection failed");
@@ -302,12 +264,6 @@ where
 ///
 /// This function should be called in the root component of your Leptos application
 /// to ensure the WebSocket connection is available throughout the app.
-pub fn provide_websocket<F, Fut>(websocket_fn: F) -> Option<()>
-where
-    F: Fn(BoxedStream<Messages, ServerFnError>) -> Fut + Clone + Send + Sync + 'static,
-    Fut: std::future::Future<Output = Result<BoxedStream<Messages, ServerFnError>, ServerFnError>>
-        + Send
-        + 'static,
-{
-    provide_websocket_inner(websocket_fn)
+pub fn provide_websocket() -> Option<()> {
+    provide_websocket_inner()
 }

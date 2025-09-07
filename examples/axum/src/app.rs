@@ -16,11 +16,10 @@ pub struct History {
 #[component]
 pub fn App() -> impl IntoView {
     // Provide websocket connection
-    leptos_ws::provide_websocket(Box::new(leptos_ws_websocket));
-    let count = leptos_ws::ServerSignal::new("count".to_string(), 0 as i32).unwrap();
+    leptos_ws::provide_websocket();
+    let count = leptos_ws::ServerSignal::new("count", 0 as i32).unwrap();
 
-    let history =
-        leptos_ws::ServerSignal::new("history".to_string(), History { entries: vec![] }).unwrap();
+    let history = leptos_ws::ServerSignal::new("history", History { entries: vec![] }).unwrap();
 
     let count = move || count.get();
 
@@ -43,7 +42,7 @@ pub fn App() -> impl IntoView {
 async fn update_count() -> Result<(), ServerFnError> {
     use std::time::Duration;
     use tokio::time::sleep;
-    let count = leptos_ws::ServerSignal::new("count".to_string(), 0 as i32).unwrap();
+    let count = leptos_ws::ServerSignal::new("count", 0 as i32).unwrap();
     for i in 0..1000 {
         count.update(move |value| *value = i);
         sleep(Duration::from_secs(1)).await;
@@ -51,19 +50,12 @@ async fn update_count() -> Result<(), ServerFnError> {
     Ok(())
 }
 use leptos_ws::messages::Messages;
-#[server(protocol = Websocket<JsonEncoding, JsonEncoding>,endpoint="leptos_ws_websocket")]
-async fn leptos_ws_websocket(
-    input: BoxedStream<Messages, ServerFnError>,
-) -> Result<BoxedStream<Messages, ServerFnError>, ServerFnError> {
-    leptos_ws::leptos_ws_websocket_inner(input).await
-}
 
 #[server]
 async fn update_history() -> Result<(), ServerFnError> {
     use std::time::Duration;
     use tokio::time::sleep;
-    let history =
-        leptos_ws::ServerSignal::new("history".to_string(), History { entries: vec![] }).unwrap();
+    let history = leptos_ws::ServerSignal::new("history", History { entries: vec![] }).unwrap();
     for i in 0..255 {
         history.update(move |value| {
             value.entries.push(HistoryEntry {
