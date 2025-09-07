@@ -30,9 +30,6 @@ mod client_signal;
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 mod client_signals;
 
-use std::future::Future;
-use std::pin::Pin;
-
 /// A type alias for a signal that synchronizes with the server.
 ///
 /// `ServerSignal<T>` represents a reactive value that can be updated from the server
