@@ -32,7 +32,7 @@ server_fn = "0.7.0-beta"
 tower_governor = { version = "0.7", optional = true }
 
 [features]
-hydrate = ["leptos/hydrate"]
+hydrate = ["leptos/hydrate","leptos_ws/hydrate"]
 ssr = [
     "dep:axum",
     "dep:futures",
