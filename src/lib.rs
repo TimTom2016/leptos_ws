@@ -6,16 +6,14 @@ use crate::messages::ServerSignalMessage;
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 use client_signals::ClientSignals;
 use codee::string::JsonSerdeCodec;
-use leptos::prelude::*;
-#[cfg(any(feature = "csr", feature = "hydrate"))]
-use leptos_use::core::ConnectionReadyState;
-#[cfg(any(feature = "csr", feature = "hydrate"))]
-use leptos_use::{use_websocket_with_options, UseWebSocketOptions, UseWebSocketReturn};
-#[cfg(any(feature = "csr", feature = "hydrate"))]
+use leptos::{
+    prelude::*,
+    server_fn::{codec::JsonEncoding, BoxedStream, Websocket},
+    task::spawn_local,
+};
 use messages::Messages;
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 use std::sync::{Arc, Mutex};
-
 pub mod error;
 pub mod messages;
 #[cfg(feature = "ssr")]
@@ -30,8 +28,21 @@ mod client_signal;
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 mod client_signals;
 
-#[cfg(all(feature = "axum", feature = "ssr"))]
-pub mod axum;
+use std::future::Future;
+use std::pin::Pin;
+
+// Type alias for the websocket function signature
+type WebsocketFn = Box<
+    dyn Fn(
+            BoxedStream<Messages, ServerFnError>,
+        ) -> Pin<
+            Box<
+                dyn Future<Output = Result<BoxedStream<Messages, ServerFnError>, ServerFnError>>
+                    + Send,
+            >,
+        > + Send
+        + 'static,
+>;
 
 /// A type alias for a signal that synchronizes with the server.
 ///
@@ -91,120 +102,160 @@ pub type ServerSignal<T> = ClientSignal<T>;
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 #[derive(Clone)]
 struct ServerSignalWebSocket {
-    send: Arc<dyn Fn(&Messages) + Send + Sync + 'static>,
-    ready_state: Signal<ConnectionReadyState>,
+    send: Sender<Result<Messages, ServerFnError>>,
     delayed_msgs: Arc<Mutex<Vec<Messages>>>,
 }
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 impl ServerSignalWebSocket {
     pub fn send(&self, msg: &Messages) -> Result<(), serde_json::Error> {
-        if self.ready_state.get() != ConnectionReadyState::Open {
-            self.delayed_msgs
-                .lock()
-                .expect("Failed to lock delayed_msgs")
-                .push(msg.clone());
-        } else {
-            (self.send)(&msg);
-        }
+        let mut send = self.send.clone();
+        send.try_send(Ok(msg.to_owned()));
         Ok(())
     }
-    pub fn new(url: &str) -> Self {
+    pub fn new<F, Fut>(websocket_fn: F) -> Self
+    where
+        F: Fn(BoxedStream<Messages, ServerFnError>) -> Fut + Clone + Send + Sync + 'static,
+        Fut: std::future::Future<
+                Output = Result<BoxedStream<Messages, ServerFnError>, ServerFnError>,
+            > + Send
+            + 'static,
+    {
+        let (tx, rx) = mpsc::channel(32);
+
         let delayed_msgs = Arc::default();
         let state_signals = ClientSignals::new();
-        let initial_connection = RwSignal::new(true);
-        // Create WebSocket with custom message handler
-        let UseWebSocketReturn {
-            ready_state,
-            send,
-            open,
-            ..
-        } = use_websocket_with_options::<Messages, Messages, JsonSerdeCodec, _, _>(
-            url,
-            UseWebSocketOptions::default()
-                .on_message(Self::handle_message(state_signals.clone()))
-                .on_open({
-                    let signals = state_signals.clone();
-                    move |_| {
-                        // Only reconnect if this is not the initial connection
-                        if !initial_connection.get() {
-                            signals.reconnect().ok();
+        spawn_local({
+            let state_signals = state_signals.clone();
+            async move {
+                match websocket_fn(rx.into()).await {
+                    Ok(mut messages) => {
+                        while let Some(msg) = messages.next().await {
+                            let Ok(msg) = msg else {
+                                leptos::logging::error!(
+                                    "{}",
+                                    msg.expect_err("Exepcting Error because of else unwrap")
+                                );
+                                continue;
+                            };
+                            match msg {
+                                Messages::ServerSignal(server_msg) => match server_msg {
+                                    ServerSignalMessage::Establish(_) => {
+                                        // Usually client-to-server message, ignore if received
+                                    }
+                                    ServerSignalMessage::EstablishResponse((name, value)) => {
+                                        state_signals.set_json(&name, value.to_owned());
+                                    }
+                                    ServerSignalMessage::Update(update) => {
+                                        state_signals.update(&update.name, update.to_owned());
+                                    }
+                                },
+                            }
                         }
-                        initial_connection.set(false);
                     }
-                })
-                .immediate(false),
-        );
+                    Err(e) => leptos::logging::error!("{e}"),
+                }
+            }
+        });
 
         let ws_client = Self {
-            ready_state: ready_state.clone(),
-            send: Arc::new(send),
+            send: tx,
             delayed_msgs,
         };
-        // Start Websocket
-        open();
 
         // Provide ClientSignals for Child Components to work
         provide_context(state_signals);
 
-        Self::setup_delayed_message_processor(&ws_client, ready_state);
-
         ws_client
-    }
-
-    fn handle_message(state_signals: ClientSignals) -> impl Fn(&Messages) {
-        move |msg: &Messages| match msg {
-            Messages::ServerSignal(server_msg) => match server_msg {
-                ServerSignalMessage::Establish(_) => {
-                    // Usually client-to-server message, ignore if received
-                }
-                ServerSignalMessage::EstablishResponse((name, value)) => {
-                    state_signals.set_json(name, value.to_owned());
-                }
-                ServerSignalMessage::Update(update) => {
-                    state_signals.update(&update.name, update.to_owned());
-                }
-            },
-        }
-    }
-
-    fn setup_delayed_message_processor(
-        ws_client: &Self,
-        ready_state: Signal<ConnectionReadyState>,
-    ) {
-        let ws_clone = ws_client.clone();
-        Effect::new(move |_| {
-            if ready_state.get() == ConnectionReadyState::Open {
-                Self::process_delayed_messages(&ws_clone);
-            }
-        });
-    }
-
-    fn process_delayed_messages(ws: &Self) {
-        let messages = {
-            let mut delayed_msgs = ws.delayed_msgs.lock().expect("Failed to lock delayed_msgs");
-            delayed_msgs.drain(..).collect::<Vec<_>>()
-        };
-
-        for msg in messages {
-            if let Err(err) = ws.send(&msg) {
-                eprintln!("Failed to send delayed message: {:?}", err);
-            }
-        }
     }
 }
 
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 #[inline]
-fn provide_websocket_inner(url: &str) -> Option<()> {
+fn provide_websocket_inner<F, Fut>(websocket_fn: F) -> Option<()>
+where
+    F: Fn(BoxedStream<Messages, ServerFnError>) -> Fut + Clone + Send + Sync + 'static,
+    Fut: std::future::Future<Output = Result<BoxedStream<Messages, ServerFnError>, ServerFnError>>
+        + Send
+        + 'static,
+{
     if let None = use_context::<ServerSignalWebSocket>() {
-        provide_context(ServerSignalWebSocket::new(url));
+        provide_context(ServerSignalWebSocket::new(Box::new(websocket_fn)));
     }
     Some(())
+}
+#[cfg(feature = "ssr")]
+pub async fn leptos_ws_websocket_inner(
+    input: BoxedStream<Messages, ServerFnError>,
+) -> Result<BoxedStream<Messages, ServerFnError>, ServerFnError> {
+    use futures::{channel::mpsc, SinkExt, StreamExt};
+    let mut input = input;
+    let (mut tx, rx) = mpsc::channel(1);
+    let server_signals = use_context::<crate::server_signals::ServerSignals>().unwrap();
+    // spawn a task to listen to the input stream of messages coming in over the websocket
+    tokio::spawn(async move {
+        let mut x = 0;
+        while let Some(msg) = input.next().await {
+            let Ok(msg) = msg else {
+                break;
+            };
+            match msg {
+                Messages::ServerSignal(server_msg) => match server_msg {
+                    ServerSignalMessage::Establish(name) => {
+                        let recv = server_signals.add_observer(name.clone()).await.unwrap();
+                        tx.send(Ok(Messages::ServerSignal(
+                            ServerSignalMessage::EstablishResponse((
+                                name.clone(),
+                                server_signals.json(name.clone()).await.unwrap().unwrap(),
+                            )),
+                        )))
+                        .await
+                        .unwrap();
+                        tokio::spawn(handle_broadcasts(recv, tx.clone()));
+                    }
+                    _ => leptos::logging::error!("Unexpected server signal message from client"),
+                },
+            }
+        }
+    });
+
+    Ok(rx.into())
+}
+use futures::{
+    channel::mpsc::{self, Receiver, Sender},
+    SinkExt, StreamExt,
+};
+#[cfg(feature = "ssr")]
+use messages::ServerSignalUpdate;
+
+#[cfg(feature = "ssr")]
+async fn handle_broadcasts(
+    mut receiver: tokio::sync::broadcast::Receiver<ServerSignalUpdate>,
+    mut sink: Sender<Result<Messages, ServerFnError>>,
+) {
+    use futures::{SinkExt, StreamExt};
+
+    while let Ok(message) = receiver.recv().await {
+        if sink
+            .send(Ok(Messages::ServerSignal(ServerSignalMessage::Update(
+                message,
+            ))))
+            .await
+            .is_err()
+        {
+            break;
+        };
+    }
 }
 
 #[cfg(feature = "ssr")]
 #[inline]
-fn provide_websocket_inner(_url: &str) -> Option<()> {
+fn provide_websocket_inner<F, Fut>(websocket_fn: F) -> Option<()>
+where
+    F: Fn(BoxedStream<Messages, ServerFnError>) -> Fut + Clone + Send + Sync + 'static,
+    Fut: std::future::Future<Output = Result<BoxedStream<Messages, ServerFnError>, ServerFnError>>
+        + Send
+        + 'static,
+{
     None
 }
 /// Establishes and provides a WebSocket connection for server signals.
@@ -251,6 +302,12 @@ fn provide_websocket_inner(_url: &str) -> Option<()> {
 ///
 /// This function should be called in the root component of your Leptos application
 /// to ensure the WebSocket connection is available throughout the app.
-pub fn provide_websocket(url: &str) -> Option<()> {
-    provide_websocket_inner(url)
+pub fn provide_websocket<F, Fut>(websocket_fn: F) -> Option<()>
+where
+    F: Fn(BoxedStream<Messages, ServerFnError>) -> Fut + Clone + Send + Sync + 'static,
+    Fut: std::future::Future<Output = Result<BoxedStream<Messages, ServerFnError>, ServerFnError>>
+        + Send
+        + 'static,
+{
+    provide_websocket_inner(websocket_fn)
 }

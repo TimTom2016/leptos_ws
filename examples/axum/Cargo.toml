@@ -42,7 +42,6 @@ ssr = [
     "dep:leptos_axum",
     "leptos/ssr",
     "leptos_ws/ssr",
-    "leptos_ws/axum",
 ]
 
 [package.metadata.cargo-all-features]

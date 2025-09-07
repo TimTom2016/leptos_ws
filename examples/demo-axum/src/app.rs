@@ -1,7 +1,16 @@
 use leptos::prelude::*;
+use leptos::server_fn::{codec::JsonEncoding, BoxedStream, Websocket};
 use leptos::task::spawn_local;
 
 use crate::messages::{Message, Messages};
+
+use leptos_ws::messages::Messages;
+#[server(protocol = Websocket<JsonEncoding, JsonEncoding>,endpoint="leptos_ws_websocket")]
+async fn leptos_ws_websocket(
+    input: BoxedStream<Messages, ServerFnError>,
+) -> Result<BoxedStream<Messages, ServerFnError>, ServerFnError> {
+    leptos_ws::leptos_ws_websocket_inner(input).await
+}
 
 #[component]
 pub fn MessageComp(message: Message) -> impl IntoView {
@@ -15,7 +24,7 @@ pub fn MessageComp(message: Message) -> impl IntoView {
 #[component]
 pub fn App() -> impl IntoView {
     // Provide websocket connection
-    leptos_ws::provide_websocket("ws://localhost:3000/ws");
+    leptos_ws::provide_websocket(Box::new(leptos_ws_websocket));
     let messages = leptos_ws::ServerSignal::new("messages".to_string(), Messages::new()).unwrap();
     let new_message = RwSignal::new("".to_string());
     view! {

@@ -34,7 +34,6 @@ use leptos_axum::{generate_route_list_with_exclusions_and_ssg_and_context, Lepto
 use leptos_axum::{handle_server_fns_with_context, AxumRouteListing};
 #[cfg(feature = "ssr")]
 use leptos_ws::server_signals::ServerSignals;
-
 #[cfg(feature = "ssr")]
 #[derive(Clone, FromRef)]
 pub struct AppState {
@@ -116,6 +115,7 @@ async fn main() {
     });
     simple_logger::init_with_level(log::Level::Debug).expect("couldn't initialize logging");
     let server_signals = ServerSignals::new();
+
     //let signal = ServerSignal::new("counter".to_string(), 1);
     // build our application with a route
     let conf = get_configuration(None).unwrap();
@@ -140,13 +140,10 @@ async fn main() {
     state.routes = Some(routes.clone());
     let app = Router::new()
         .route("/api/{*fn_name}", post(server_fn_handler))
+        .route("/api/{*fn_name}", get(server_fn_handler))
         .layer(GovernorLayer {
             config: governor_conf,
         })
-        .route(
-            "/ws",
-            get(leptos_ws::axum::websocket(state.server_signals.clone())),
-        )
         .leptos_routes_with_handler(routes, get(leptos_routes_handler))
         .fallback(file_and_error_handler)
         .with_state(state);
