@@ -4,7 +4,6 @@ use crate::error::Error;
 use crate::messages::Messages;
 use crate::messages::SignalUpdate;
 use crate::traits::WsSignalCore;
-use crate::ServerSignalMessage;
 use dashmap::DashMap;
 use leptos::prelude::*;
 use serde_json::Value;
@@ -65,7 +64,7 @@ impl WsSignals {
         self.signals.contains_key(name)
     }
 
-    pub fn add_observer(&self, name: &str) -> Option<Receiver<(Option<String>, SignalUpdate)>> {
+    pub fn add_observer(&self, name: &str) -> Option<Receiver<(Option<String>, Messages)>> {
         match self.signals.get(name) {
             Some(value) => value.value().subscribe().ok(),
             None => None,
@@ -84,6 +83,7 @@ impl WsSignals {
         patch: SignalUpdate,
         id: Option<String>,
     ) -> Option<Result<(), Error>> {
+        leptos::logging::log!("Updated signal {} with id: {:?}", name, id);
         match self.signals.get_mut(name) {
             Some(value) => Some(value.update_json(patch.get_patch(), id).await),
             None => None,

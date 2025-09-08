@@ -1,4 +1,4 @@
-use crate::messages::{BiDirectionalMessage, Messages, ServerSignalMessage, SignalUpdate};
+use crate::messages::{BiDirectionalMessage, Messages, SignalUpdate};
 use crate::traits::WsSignalCore;
 use crate::{error::Error, ws_signals::WsSignals};
 use async_trait::async_trait;
@@ -22,7 +22,7 @@ where
     name: String,
     value: ArcRwSignal<T>,
     json_value: Arc<RwLock<Value>>,
-    observers: Arc<Sender<(Option<String>, SignalUpdate)>>,
+    observers: Arc<Sender<(Option<String>, Messages)>>,
 }
 
 #[async_trait]
@@ -53,9 +53,12 @@ impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
                     .map_err(|err| Error::SerializationFailed(err))?,
             );
             if id.is_none() {
-                let _ = self
-                    .observers
-                    .send((None, SignalUpdate::new_from_patch(self.name.clone(), patch)));
+                let _ = self.observers.send((
+                    None,
+                    Messages::BiDirectional(BiDirectionalMessage::Update(
+                        SignalUpdate::new_from_patch(self.name.clone(), patch),
+                    )),
+                ));
             }
             Ok(())
         } else {
@@ -76,7 +79,7 @@ impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
     }
     fn subscribe(
         &self,
-    ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, SignalUpdate)>, Error> {
+    ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, Messages)>, Error> {
         Ok(self.observers.subscribe())
     }
 }

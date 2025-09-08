@@ -16,6 +16,7 @@ pub use read_only::ReadOnlySignal;
 use std::sync::{Arc, Mutex};
 pub use ws_signals::WsSignals;
 mod bidirectional;
+mod channel;
 pub mod error;
 pub mod messages;
 mod read_only;
@@ -115,20 +116,7 @@ impl ServerSignalWebSocket {
                                     ServerSignalMessage::EstablishResponse((name, value)) => {
                                         state_signals.set_json(&name, value.to_owned());
                                     }
-                                    ServerSignalMessage::Update(update) => {
-                                        spawn_local({
-                                            let state_signals = state_signals.clone();
-                                            async move {
-                                                state_signals
-                                                    .update(
-                                                        update.get_name(),
-                                                        update.to_owned(),
-                                                        None,
-                                                    )
-                                                    .await;
-                                            }
-                                        });
-                                    }
+                                    ServerSignalMessage::Update(update) => {}
                                 },
                                 Messages::BiDirectional(bidirectional) => match bidirectional {
                                     BiDirectionalMessage::Establish(_) => {
@@ -248,17 +236,11 @@ use messages::SignalUpdate;
 
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 async fn handle_broadcasts_client(
-    mut receiver: tokio::sync::broadcast::Receiver<(Option<String>, SignalUpdate)>,
+    mut receiver: tokio::sync::broadcast::Receiver<(Option<String>, Messages)>,
     mut sink: Sender<Result<Messages, ServerFnError>>,
 ) {
     while let Ok(message) = receiver.recv().await {
-        if sink
-            .send(Ok(Messages::BiDirectional(BiDirectionalMessage::Update(
-                message.1,
-            ))))
-            .await
-            .is_err()
-        {
+        if sink.send(Ok(message.1)).await.is_err() {
             break;
         };
     }
@@ -267,20 +249,14 @@ async fn handle_broadcasts_client(
 #[cfg(feature = "ssr")]
 async fn handle_broadcasts(
     id: String,
-    mut receiver: tokio::sync::broadcast::Receiver<(Option<String>, SignalUpdate)>,
+    mut receiver: tokio::sync::broadcast::Receiver<(Option<String>, Messages)>,
     mut sink: Sender<Result<Messages, ServerFnError>>,
 ) {
     while let Ok(message) = receiver.recv().await {
         if message.0.is_some_and(|v| id == v) {
             continue;
         }
-        if sink
-            .send(Ok(Messages::ServerSignal(ServerSignalMessage::Update(
-                message.1,
-            ))))
-            .await
-            .is_err()
-        {
+        if sink.send(Ok(message.1)).await.is_err() {
             break;
         };
     }

@@ -4,7 +4,7 @@ use std::panic::Location;
 use std::sync::{Arc, RwLock};
 
 use crate::error::Error;
-use crate::messages::{BiDirectionalMessage, Messages, ServerSignalMessage, SignalUpdate};
+use crate::messages::{BiDirectionalMessage, Messages, SignalUpdate};
 use crate::traits::WsSignalCore;
 use crate::ws_signals::WsSignals;
 use async_trait::async_trait;
@@ -14,7 +14,7 @@ use json_patch::Patch;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::broadcast::{channel, Receiver, Sender};
+use tokio::sync::broadcast::{channel, Sender};
 
 /// A signal owned by the server which writes to the websocket when mutated.
 #[derive(Clone, Debug)]
@@ -26,7 +26,7 @@ where
     name: String,
     value: ArcRwSignal<T>,
     json_value: Arc<RwLock<Value>>,
-    observers: Arc<Sender<(Option<String>, SignalUpdate)>>,
+    observers: Arc<Sender<(Option<String>, Messages)>>,
 }
 #[async_trait]
 impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
@@ -59,9 +59,12 @@ impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
                         .map_err(|err| Error::SerializationFailed(err))?,
                 );
             }
-            let _ = self
-                .observers
-                .send((id, SignalUpdate::new_from_patch(self.name.clone(), patch)));
+            let _ = self.observers.send((
+                id,
+                Messages::BiDirectional(BiDirectionalMessage::Update(
+                    SignalUpdate::new_from_patch(self.name.clone(), patch),
+                )),
+            ));
             Ok(())
         } else {
             Err(Error::UpdateSignalFailed)
@@ -82,7 +85,7 @@ impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
 
     fn subscribe(
         &self,
-    ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, SignalUpdate)>, Error> {
+    ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, Messages)>, Error> {
         Ok(self.observers.subscribe())
     }
 }

@@ -1,4 +1,7 @@
-use crate::{error::Error, messages::SignalUpdate};
+use crate::{
+    error::Error,
+    messages::{Messages, SignalUpdate},
+};
 use async_trait::async_trait;
 use json_patch::Patch;
 use leptos::prelude::Update;
@@ -15,5 +18,5 @@ pub trait WsSignalCore {
     fn set_json(&self, new_value: Value) -> Result<(), Error>;
     fn subscribe(
         &self,
-    ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, SignalUpdate)>, Error>;
+    ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, Messages)>, Error>;
 }
