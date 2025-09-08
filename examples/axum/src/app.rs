@@ -20,8 +20,13 @@ pub fn App() -> impl IntoView {
     let count = leptos_ws::ReadOnlySignal::new("count", 0 as i32).unwrap();
 
     let history = leptos_ws::ReadOnlySignal::new("history", History { entries: vec![] }).unwrap();
+    let count_bidirectional = leptos_ws::BiDirectionalSignal::new("count_bi", 0 as i32).unwrap();
 
     let count = move || count.get();
+    let count_bi = {
+        let count_bidirectional = count_bidirectional.clone();
+        move || count_bidirectional.get()
+    };
 
     view! {
         <button on:click=move |_| {
@@ -36,6 +41,15 @@ pub fn App() -> impl IntoView {
             });
         }>Start History Changes</button>
         <p>{move || format!("history: {:?}",history.get())}</p>
+        <button on:click={let count_bi = count_bidirectional.clone(); move |_| {
+            count_bi.update(move |value| *value += 1);
+        }}>Increment Counter Client</button>
+        <button on:click=move |_| {
+            spawn_local(async move {
+                update_count_bi().await.unwrap();
+            });
+        }>Increment Counter Server</button>
+        <h1>"Count: " {count_bi}</h1>
     }
 }
 #[server]
@@ -48,6 +62,15 @@ async fn update_count() -> Result<(), ServerFnError> {
         println!("Updated count to {}", i);
         sleep(Duration::from_secs(1)).await;
     }
+    Ok(())
+}
+
+#[server]
+async fn update_count_bi() -> Result<(), ServerFnError> {
+    use std::time::Duration;
+    use tokio::time::sleep;
+    let count = leptos_ws::BiDirectionalSignal::new("count_bi", 0 as i32).unwrap();
+    count.update(move |value| *value += 100);
     Ok(())
 }
 use leptos_ws::messages::Messages;

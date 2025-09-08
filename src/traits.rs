@@ -13,7 +13,6 @@ pub trait WsSignalCore {
     async fn update_json(&self, patch: &Patch, id: Option<String>) -> Result<(), Error>;
 
     fn set_json(&self, new_value: Value) -> Result<(), Error>;
-    #[cfg(feature = "ssr")]
     fn subscribe(
         &self,
     ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, SignalUpdate)>, Error>;

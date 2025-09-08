@@ -4,7 +4,7 @@ use std::panic::Location;
 use std::sync::{Arc, RwLock};
 
 use crate::error::Error;
-use crate::messages::SignalUpdate;
+use crate::messages::{Messages, ServerSignalMessage, SignalUpdate};
 use crate::traits::WsSignalCore;
 use crate::ws_signals::WsSignals;
 use async_trait::async_trait;
@@ -98,7 +98,13 @@ where
             observers: Arc::new(send),
         };
         let signal = new_signal.clone();
-        signals.create_signal(name, new_signal).unwrap();
+        signals
+            .create_signal(
+                name,
+                new_signal,
+                &Messages::ServerSignal(ServerSignalMessage::Establish(name.to_owned())),
+            )
+            .unwrap();
         Ok(signal)
     }
 

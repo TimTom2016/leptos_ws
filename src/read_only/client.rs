@@ -1,4 +1,4 @@
-use crate::messages::SignalUpdate;
+use crate::messages::{Messages, ServerSignalMessage, SignalUpdate};
 use crate::traits::WsSignalCore;
 use crate::{error::Error, ws_signals::WsSignals};
 use async_trait::async_trait;
@@ -66,7 +66,6 @@ impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
         );
         Ok(())
     }
-    #[cfg(feature = "ssr")]
     fn subscribe(
         &self,
     ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, SignalUpdate)>, Error> {
@@ -93,7 +92,13 @@ where
             name: name.to_owned(),
         };
         let signal = new_signal.clone();
-        signals.create_signal(name, new_signal).unwrap();
+        signals
+            .create_signal(
+                name,
+                new_signal,
+                &Messages::ServerSignal(ServerSignalMessage::Establish(name.to_owned())),
+            )
+            .unwrap();
         Ok(signal)
     }
 }

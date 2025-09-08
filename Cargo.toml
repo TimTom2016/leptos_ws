@@ -27,13 +27,13 @@ thiserror = { version = "2.0" }
 async-trait = "0.1"
 
 futures = { version = "0.3", default-features = false}
-tokio = { version = "1.38.0", optional = true, features = ["rt-multi-thread","sync"] }
+tokio = { version = "1.38.0", features = ["sync"] }
 dashmap = "6.1.0"
 nanoid = {version= "0.4.0", optional = true}
 
 [features]
 default = []
-ssr = ["leptos/ssr", "dep:tokio", "dep:nanoid"]
+ssr = ["leptos/ssr", "dep:nanoid","tokio/rt-multi-thread"]
 csr = ["leptos/csr",]
 hydrate = ["leptos/hydrate",]
 

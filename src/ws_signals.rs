@@ -8,7 +8,6 @@ use crate::ServerSignalMessage;
 use dashmap::DashMap;
 use leptos::prelude::*;
 use serde_json::Value;
-#[cfg(feature = "ssr")]
 use tokio::sync::broadcast::Receiver;
 
 #[derive(Clone)]
@@ -22,7 +21,7 @@ impl WsSignals {
         let me = Self { signals };
         me
     }
-    pub fn create_signal<T>(&mut self, name: &str, value: T) -> Result<(), Error>
+    pub fn create_signal<T>(&mut self, name: &str, value: T, msg: &Messages) -> Result<(), Error>
     where
         T: WsSignalCore + Send + Sync + Clone + 'static,
     {
@@ -38,9 +37,7 @@ impl WsSignals {
                 .is_none()
             {
                 // Wrap the Establish message in ServerSignalMessage and Messages
-                ws.send(&Messages::ServerSignal(ServerSignalMessage::Establish(
-                    name.to_owned(),
-                )))?;
+                ws.send(msg)?;
                 return Ok(());
             }
         }
@@ -68,7 +65,6 @@ impl WsSignals {
         self.signals.contains_key(name)
     }
 
-    #[cfg(feature = "ssr")]
     pub fn add_observer(&self, name: &str) -> Option<Receiver<(Option<String>, SignalUpdate)>> {
         match self.signals.get(name) {
             Some(value) => value.value().subscribe().ok(),

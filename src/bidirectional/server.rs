@@ -4,7 +4,7 @@ use std::panic::Location;
 use std::sync::{Arc, RwLock};
 
 use crate::error::Error;
-use crate::messages::SignalUpdate;
+use crate::messages::{BiDirectionalMessage, Messages, ServerSignalMessage, SignalUpdate};
 use crate::traits::WsSignalCore;
 use crate::ws_signals::WsSignals;
 use async_trait::async_trait;
@@ -18,7 +18,7 @@ use tokio::sync::broadcast::{channel, Receiver, Sender};
 
 /// A signal owned by the server which writes to the websocket when mutated.
 #[derive(Clone, Debug)]
-pub struct ServerReadOnlySignal<T>
+pub struct ServerBidirectionalSignal<T>
 where
     T: Clone + Send + Sync + for<'de> Deserialize<'de>,
 {
@@ -30,7 +30,7 @@ where
 }
 #[async_trait]
 impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
-    for ServerReadOnlySignal<T>
+    for ServerBidirectionalSignal<T>
 {
     fn as_any(&self) -> &dyn Any {
         self
@@ -47,6 +47,7 @@ impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
 
     async fn update_json(&self, patch: &Patch, id: Option<String>) -> Result<(), Error> {
         let mut writer = self.json_value.write();
+
         let Ok(mut writer) = writer.as_deref_mut() else {
             return Err(Error::UpdateSignalFailed);
         };
@@ -86,17 +87,19 @@ impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
     }
 }
 
-impl<T> ServerReadOnlySignal<T>
+impl<T> ServerBidirectionalSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
     pub fn new(name: &str, value: T) -> Result<Self, Error> {
         let mut signals = use_context::<WsSignals>().ok_or(Error::MissingServerSignals)?;
         if signals.contains(&name) {
-            return Ok(signals.get_signal::<ServerReadOnlySignal<T>>(name).unwrap());
+            return Ok(signals
+                .get_signal::<ServerBidirectionalSignal<T>>(name)
+                .unwrap());
         }
         let (send, _) = channel(32);
-        let new_signal = ServerReadOnlySignal {
+        let new_signal = ServerBidirectionalSignal {
             initial: value.clone(),
             name: name.to_owned(),
             value: ArcRwSignal::new(value.clone()),
@@ -104,7 +107,13 @@ where
             observers: Arc::new(send),
         };
         let signal = new_signal.clone();
-        signals.create_signal(name, new_signal).unwrap();
+        signals
+            .create_signal(
+                name,
+                new_signal,
+                &Messages::BiDirectional(BiDirectionalMessage::Establish(name.to_owned())),
+            )
+            .unwrap();
         Ok(signal)
     }
 
@@ -140,7 +149,7 @@ where
     }
 }
 
-impl<T> Update for ServerReadOnlySignal<T>
+impl<T> Update for ServerBidirectionalSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
@@ -160,7 +169,7 @@ where
     }
 }
 
-impl<T> DefinedAt for ServerReadOnlySignal<T>
+impl<T> DefinedAt for ServerBidirectionalSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
@@ -169,7 +178,7 @@ where
     }
 }
 
-impl<T> ReadUntracked for ServerReadOnlySignal<T>
+impl<T> ReadUntracked for ServerBidirectionalSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
@@ -187,7 +196,7 @@ where
     }
 }
 
-impl<T> Get for ServerReadOnlySignal<T>
+impl<T> Get for ServerBidirectionalSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
@@ -202,7 +211,7 @@ where
     }
 }
 
-impl<T> Deref for ServerReadOnlySignal<T>
+impl<T> Deref for ServerBidirectionalSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {

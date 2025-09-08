@@ -4,6 +4,7 @@
 
 // #![feature(unboxed_closures)]
 use crate::messages::ServerSignalMessage;
+pub use bidirectional::BiDirectionalSignal;
 use leptos::{
     prelude::*,
     server_fn::{codec::JsonEncoding, BoxedStream, Websocket},
@@ -12,8 +13,6 @@ use leptos::{
 use messages::{BiDirectionalMessage, Messages};
 pub use read_only::ReadOnlySignal;
 
-use std::ops::Deref;
-#[cfg(any(feature = "csr", feature = "hydrate"))]
 use std::sync::{Arc, Mutex};
 pub use ws_signals::WsSignals;
 mod bidirectional;
@@ -93,8 +92,10 @@ impl ServerSignalWebSocket {
 
         let delayed_msgs = Arc::default();
         let state_signals = WsSignals::new();
+        let id = Arc::new(String::new());
         spawn_local({
             let state_signals = state_signals.clone();
+            let tx = tx.clone();
             async move {
                 match leptos_ws_websocket(rx.into()).await {
                     Ok(mut messages) => {
@@ -123,6 +124,31 @@ impl ServerSignalWebSocket {
                                                         update.get_name(),
                                                         update.to_owned(),
                                                         None,
+                                                    )
+                                                    .await;
+                                            }
+                                        });
+                                    }
+                                },
+                                Messages::BiDirectional(bidirectional) => match bidirectional {
+                                    BiDirectionalMessage::Establish(_) => {
+                                        // Usually client-to-server message, ignore if received
+                                    }
+                                    BiDirectionalMessage::EstablishResponse((name, value)) => {
+                                        state_signals.set_json(&name, value.to_owned());
+                                        let recv = state_signals.add_observer(&name).unwrap();
+                                        spawn_local(handle_broadcasts_client(recv, tx.clone()));
+                                    }
+                                    BiDirectionalMessage::Update(update) => {
+                                        spawn_local({
+                                            let state_signals = state_signals.clone();
+                                            let id = id.clone();
+                                            async move {
+                                                state_signals
+                                                    .update(
+                                                        update.get_name(),
+                                                        update.to_owned(),
+                                                        Some(id.to_string()),
                                                     )
                                                     .await;
                                             }
@@ -191,8 +217,8 @@ pub async fn leptos_ws_websocket(
                 Messages::BiDirectional(bidirectional) => match bidirectional {
                     BiDirectionalMessage::Establish(name) => {
                         let recv = server_signals.add_observer(&name).unwrap();
-                        tx.send(Ok(Messages::ServerSignal(
-                            ServerSignalMessage::EstablishResponse((
+                        tx.send(Ok(Messages::BiDirectional(
+                            BiDirectionalMessage::EstablishResponse((
                                 name.clone(),
                                 server_signals.json(&name).unwrap().unwrap(),
                             )),
@@ -202,11 +228,9 @@ pub async fn leptos_ws_websocket(
                         tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
                     }
                     BiDirectionalMessage::Update(update) => {
-                        server_signals.update(
-                            update.get_name(),
-                            update.to_owned(),
-                            Some(id.to_string()),
-                        );
+                        server_signals
+                            .update(update.get_name(), update.to_owned(), Some(id.to_string()))
+                            .await;
                     }
                     _ => leptos::logging::error!("Unexpected bi-directional message from client"),
                 },
@@ -220,8 +244,25 @@ use futures::{
     channel::mpsc::{self, Sender},
     SinkExt, StreamExt,
 };
-#[cfg(feature = "ssr")]
 use messages::SignalUpdate;
+
+#[cfg(any(feature = "csr", feature = "hydrate"))]
+async fn handle_broadcasts_client(
+    mut receiver: tokio::sync::broadcast::Receiver<(Option<String>, SignalUpdate)>,
+    mut sink: Sender<Result<Messages, ServerFnError>>,
+) {
+    while let Ok(message) = receiver.recv().await {
+        if sink
+            .send(Ok(Messages::BiDirectional(BiDirectionalMessage::Update(
+                message.1,
+            ))))
+            .await
+            .is_err()
+        {
+            break;
+        };
+    }
+}
 
 #[cfg(feature = "ssr")]
 async fn handle_broadcasts(
