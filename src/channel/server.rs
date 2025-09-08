@@ -4,8 +4,8 @@ use std::panic::Location;
 use std::sync::{Arc, RwLock};
 
 use crate::error::Error;
-use crate::messages::{Messages, ServerSignalMessage, SignalUpdate};
-use crate::traits::WsSignalCore;
+use crate::messages::{ChannelMessage, Messages, ServerSignalMessage, SignalUpdate};
+use crate::traits::{ChannelSignalTrait, WsSignalCore};
 use crate::ws_signals::WsSignals;
 use async_trait::async_trait;
 use futures::executor::block_on;
@@ -17,64 +17,50 @@ use serde_json::Value;
 use tokio::sync::broadcast::{channel, Sender};
 
 /// A signal owned by the server which writes to the websocket when mutated.
-#[derive(Clone, Debug)]
-pub struct ServerReadOnlySignal<T>
+#[derive(Clone)]
+pub struct ServerChannelSignal<T>
 where
     T: Clone + Send + Sync + for<'de> Deserialize<'de>,
 {
-    initial: T,
     name: String,
-    value: ArcRwSignal<T>,
-    json_value: Arc<RwLock<Value>>,
     observers: Arc<Sender<(Option<String>, Messages)>>,
+    server_callback: Arc<RwLock<Option<Arc<dyn Fn(&T) + Send + Sync + 'static>>>>,
 }
+
 #[async_trait]
-impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
-    for ServerReadOnlySignal<T>
+impl<T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static> ChannelSignalTrait
+    for ServerChannelSignal<T>
 {
+    // fn send_to_client(&self, data: T) -> Result<(), Error> {
+    //     let json_data =
+    //         serde_json::to_value(&data).map_err(|err| Error::SerializationFailed(err))?;
+
+    //     // Create a patch update message to send to clients
+    //     let current_json = self.json()?;
+    //     let patch = json_patch::diff(&current_json, &json_data);
+    //     let update = SignalUpdate::new_from_patch(self.name.clone(), &patch);
+
+    //     // Send to all connected clients via the observers channel
+    //     let _ = self.observers.send((
+    //         None, // None means broadcast to all clients
+    //         Messages::ServerSignal(ServerSignalMessage::Update(update)),
+    //     ));
+
+    //     // Update local JSON value
+    //     self.set_json(json_data)?;
+
+    //     // Trigger client callbacks (for local processing)
+    //     if let Ok(callbacks) = self.client_callbacks.read() {
+    //         for callback in callbacks.iter() {
+    //             callback(&data);
+    //         }
+    //     }
+
+    //     Ok(())
+    // }
+
     fn as_any(&self) -> &dyn Any {
         self
-    }
-    fn name(&self) -> &str {
-        &self.name
-    }
-    fn json(&self) -> Result<Value, Error> {
-        self.json_value
-            .read()
-            .map(|value| value.clone())
-            .map_err(|_| Error::AddingSignalFailed)
-    }
-
-    async fn update_json(&self, patch: &Patch, id: Option<String>) -> Result<(), Error> {
-        let mut writer = self.json_value.write();
-        let Ok(mut writer) = writer.as_deref_mut() else {
-            return Err(Error::UpdateSignalFailed);
-        };
-
-        if json_patch::patch(&mut writer, patch).is_ok() {
-            let _ = self.observers.send((
-                id,
-                Messages::ServerSignal(ServerSignalMessage::Update(SignalUpdate::new_from_patch(
-                    self.name.clone(),
-                    patch,
-                ))),
-            ));
-            Ok(())
-        } else {
-            Err(Error::UpdateSignalFailed)
-        }
-    }
-    fn set_json(&self, new_value: Value) -> Result<(), Error> {
-        let mut writer = self
-            .json_value
-            .write()
-            .map_err(|_| Error::UpdateSignalFailed)?;
-        *writer = new_value;
-        self.value.set(
-            serde_json::from_value(writer.clone())
-                .map_err(|err| Error::SerializationFailed(err))?,
-        );
-        Ok(())
     }
 
     fn subscribe(
@@ -82,49 +68,42 @@ impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
     ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, Messages)>, Error> {
         Ok(self.observers.subscribe())
     }
+
+    fn handle_message(&self, message: Value) -> Result<(), Error> {
+        if let Ok(lock) = self.server_callback.read() {
+            if let Some(callback) = lock.as_ref() {
+                if let Ok(message) = serde_json::from_value(message) {
+                    callback(&message);
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
-impl<T> ServerReadOnlySignal<T>
+impl<T> ServerChannelSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
-    pub fn new(name: &str, value: T) -> Result<Self, Error> {
+    pub fn new(name: &str) -> Result<Self, Error> {
         let mut signals = use_context::<WsSignals>().ok_or(Error::MissingServerSignals)?;
-        if signals.contains(&name) {
-            return Ok(signals.get_signal::<ServerReadOnlySignal<T>>(name).unwrap());
+        if let Some(signal) = signals.get_channel::<ServerChannelSignal<T>>(name) {
+            return Ok(signal);
         }
         let (send, _) = channel(32);
-        let new_signal = ServerReadOnlySignal {
-            initial: value.clone(),
+        let new_signal = ServerChannelSignal {
             name: name.to_owned(),
-            value: ArcRwSignal::new(value.clone()),
-            json_value: Arc::new(RwLock::new(serde_json::to_value(value)?)),
             observers: Arc::new(send),
+            server_callback: Arc::new(RwLock::new(None)),
         };
         let signal = new_signal.clone();
-        signals
-            .create_signal(
-                name,
-                new_signal,
-                &Messages::ServerSignal(ServerSignalMessage::Establish(name.to_owned())),
-            )
-            .unwrap();
+        signals.create_channel(
+            name,
+            new_signal,
+            &Messages::Channel(ChannelMessage::Establish(name.to_owned())),
+        )?;
         Ok(signal)
-    }
-
-    async fn update_if_changed(&self) -> Result<(), Error> {
-        let Ok(json) = self.json_value.read() else {
-            return Err(Error::UpdateSignalFailed);
-        };
-
-        let new_json = serde_json::to_value(self.value.get())?;
-        let mut res = Err(Error::UpdateSignalFailed);
-        if *json != new_json {
-            let patch = json_patch::diff(&json, &new_json);
-            drop(json);
-            res = self.update_json(&patch, None).await;
-        }
-        res
     }
 
     fn check_is_hydrating(&self) -> bool {
@@ -143,77 +122,34 @@ where
         #[allow(unreachable_code)]
         false
     }
-}
 
-impl<T> Update for ServerReadOnlySignal<T>
-where
-    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
-{
-    type Value = T;
-
-    fn try_maybe_update<U>(&self, fun: impl FnOnce(&mut Self::Value) -> (bool, U)) -> Option<U> {
-        let mut lock = self.value.try_write()?;
-        let (did_update, val) = fun(&mut *lock);
-        if !did_update {
-            lock.untrack();
-        }
-        drop(lock);
-        block_on(async move {
-            let _ = self.update_if_changed().await;
-        });
-        Some(val)
+    /// Register a callback that gets called when a message arrives on the server side
+    pub fn on_server<F>(&self, callback: F) -> Result<(), Error>
+    where
+        F: Fn(&T) + Send + Sync + 'static,
+    {
+        let Ok(mut server_callback) = self.server_callback.write() else {
+            return Err(Error::AddingChannelHandlerFailed);
+        };
+        *server_callback = Some(Arc::new(callback));
+        Ok(())
     }
-}
 
-impl<T> DefinedAt for ServerReadOnlySignal<T>
-where
-    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
-{
-    fn defined_at(&self) -> Option<&'static Location<'static>> {
-        self.value.defined_at()
+    /// Register a callback that gets called when a message arrives on the client side
+    pub fn on_client<F>(&self, _callback: F) -> Result<(), Error>
+    where
+        F: Fn(&T) + Send + Sync + 'static,
+    {
+        Ok(())
     }
-}
 
-impl<T> ReadUntracked for ServerReadOnlySignal<T>
-where
-    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
-{
-    type Value = ReadGuard<T, Plain<T>>;
+    pub fn send_message(&self, message: T) -> Result<(), Error> {
+        let message = serde_json::to_value(&message)?;
+        self.observers.send((
+            None,
+            Messages::Channel(ChannelMessage::Message(self.name.clone(), message)),
+        ));
 
-    fn try_read_untracked(&self) -> Option<Self::Value> {
-        if self.check_is_hydrating() {
-            let guard: ReadGuard<T, Plain<T>> = ReadGuard::new(
-                Plain::try_new(Arc::new(std::sync::RwLock::new(self.initial.clone()))).unwrap(),
-            );
-            return Some(guard);
-        }
-
-        self.value.try_read_untracked()
-    }
-}
-
-impl<T> Get for ServerReadOnlySignal<T>
-where
-    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
-{
-    type Value = T;
-
-    fn try_get(&self) -> Option<Self::Value> {
-        #[cfg(feature = "ssr")]
-        if self.check_is_hydrating() {
-            return Some(self.initial.clone());
-        }
-        self.value.try_get()
-    }
-}
-
-impl<T> Deref for ServerReadOnlySignal<T>
-where
-    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
-{
-    type Target = ArcRwSignal<T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.value
+        Ok(())
     }
 }

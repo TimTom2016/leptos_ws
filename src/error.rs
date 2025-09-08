@@ -6,6 +6,9 @@ pub enum Error {
     MissingServerSignals,
     #[error("Could not add ServerSignal to ServerSignals")]
     AddingSignalFailed,
+    #[error("Could not add ChannelHandler to ChannelHandlers")]
+    AddingChannelHandlerFailed,
+
     #[error("Could not update Signal")]
     UpdateSignalFailed,
 

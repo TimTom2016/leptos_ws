@@ -1,6 +1,6 @@
 use crate::{
     error::Error,
-    messages::{Messages, SignalUpdate},
+    messages::{ChannelMessage, Messages, SignalUpdate},
 };
 use async_trait::async_trait;
 use json_patch::Patch;
@@ -19,4 +19,17 @@ pub trait WsSignalCore {
     fn subscribe(
         &self,
     ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, Messages)>, Error>;
+}
+
+/// Trait for channel signals that can handle server and client-side message callbacks
+#[async_trait]
+pub trait ChannelSignalTrait: Send + Sync + 'static {
+    fn as_any(&self) -> &dyn Any;
+
+    /// Subscribe to updates
+    fn subscribe(
+        &self,
+    ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, Messages)>, Error>;
+    /// Call callback function with message
+    fn handle_message(&self, message: Value) -> Result<(), Error>;
 }

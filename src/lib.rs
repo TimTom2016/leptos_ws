@@ -5,12 +5,13 @@
 // #![feature(unboxed_closures)]
 use crate::messages::ServerSignalMessage;
 pub use bidirectional::BiDirectionalSignal;
+pub use channel::ChannelSignal;
 use leptos::{
     prelude::*,
     server_fn::{codec::JsonEncoding, BoxedStream, Websocket},
     task::spawn_local,
 };
-use messages::{BiDirectionalMessage, Messages};
+use messages::{BiDirectionalMessage, ChannelMessage, Messages};
 pub use read_only::ReadOnlySignal;
 
 use std::sync::{Arc, Mutex};
@@ -143,6 +144,19 @@ impl ServerSignalWebSocket {
                                         });
                                     }
                                 },
+                                Messages::Channel(channel) => match channel {
+                                    ChannelMessage::Establish(_) => {
+                                        // Usually client-to-server message, ignore if received
+                                    }
+                                    ChannelMessage::EstablishResponse(name) => {
+                                        let recv =
+                                            state_signals.add_observer_channel(&name).unwrap();
+                                        spawn_local(handle_broadcasts_client(recv, tx.clone()));
+                                    }
+                                    ChannelMessage::Message(name, value) => {
+                                        state_signals.handle_message(&name, value);
+                                    }
+                                },
                             }
                         }
                     }
@@ -221,6 +235,22 @@ pub async fn leptos_ws_websocket(
                             .await;
                     }
                     _ => leptos::logging::error!("Unexpected bi-directional message from client"),
+                },
+                Messages::Channel(channel) => match channel {
+                    ChannelMessage::Establish(name) => {
+                        let recv = server_signals.add_observer_channel(&name).unwrap();
+                        tx.send(Ok(Messages::Channel(ChannelMessage::EstablishResponse(
+                            name.clone(),
+                        ))))
+                        .await
+                        .unwrap();
+                        tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                    }
+
+                    ChannelMessage::Message(name, value) => {
+                        server_signals.handle_message(&name, value);
+                    }
+                    _ => leptos::logging::error!("Unexpected channel message from client"),
                 },
             }
         }
