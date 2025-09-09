@@ -1,4 +1,4 @@
-use crate::messages::{ChannelMessage, Messages, ServerSignalMessage};
+use crate::messages::{ChannelMessage, Messages};
 use crate::traits::ChannelSignalTrait;
 use crate::{error::Error, ws_signals::WsSignals};
 use async_trait::async_trait;
@@ -99,7 +99,7 @@ where
     }
 
     /// Register a callback that gets called when a message arrives on the server side
-    pub fn on_server<F>(&self, callback: F) -> Result<(), Error>
+    pub fn on_server<F>(&self, _callback: F) -> Result<(), Error>
     where
         F: Fn(&T) + Send + Sync + 'static,
     {
@@ -118,6 +118,7 @@ where
         Ok(())
     }
 
+    /// Send a message to the server
     pub fn send_message(&self, message: T) -> Result<(), Error> {
         let message = serde_json::to_value(&message)?;
         self.observers.send((

@@ -142,7 +142,6 @@ impl WsSignals {
         patch: SignalUpdate,
         id: Option<String>,
     ) -> Option<Result<(), Error>> {
-        leptos::logging::log!("Updated signal {} with id: {:?}", name, id);
         match self.signals.get_mut(name) {
             Some(value) => Some(value.update_json(patch.get_patch(), id).await),
             None => None,

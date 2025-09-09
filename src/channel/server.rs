@@ -1,16 +1,11 @@
 use std::any::Any;
-use std::ops::Deref;
-use std::panic::Location;
 use std::sync::{Arc, RwLock};
 
 use crate::error::Error;
-use crate::messages::{ChannelMessage, Messages, ServerSignalMessage, SignalUpdate};
-use crate::traits::{ChannelSignalTrait, WsSignalCore};
+use crate::messages::{ChannelMessage, Messages};
+use crate::traits::ChannelSignalTrait;
 use crate::ws_signals::WsSignals;
 use async_trait::async_trait;
-use futures::executor::block_on;
-use guards::{Plain, ReadGuard};
-use json_patch::Patch;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -31,34 +26,6 @@ where
 impl<T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static> ChannelSignalTrait
     for ServerChannelSignal<T>
 {
-    // fn send_to_client(&self, data: T) -> Result<(), Error> {
-    //     let json_data =
-    //         serde_json::to_value(&data).map_err(|err| Error::SerializationFailed(err))?;
-
-    //     // Create a patch update message to send to clients
-    //     let current_json = self.json()?;
-    //     let patch = json_patch::diff(&current_json, &json_data);
-    //     let update = SignalUpdate::new_from_patch(self.name.clone(), &patch);
-
-    //     // Send to all connected clients via the observers channel
-    //     let _ = self.observers.send((
-    //         None, // None means broadcast to all clients
-    //         Messages::ServerSignal(ServerSignalMessage::Update(update)),
-    //     ));
-
-    //     // Update local JSON value
-    //     self.set_json(json_data)?;
-
-    //     // Trigger client callbacks (for local processing)
-    //     if let Ok(callbacks) = self.client_callbacks.read() {
-    //         for callback in callbacks.iter() {
-    //             callback(&data);
-    //         }
-    //     }
-
-    //     Ok(())
-    // }
-
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -143,6 +110,7 @@ where
         Ok(())
     }
 
+    /// Send a message to the client
     pub fn send_message(&self, message: T) -> Result<(), Error> {
         let message = serde_json::to_value(&message)?;
         self.observers.send((

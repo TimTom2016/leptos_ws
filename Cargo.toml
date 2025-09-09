@@ -1,7 +1,7 @@
 [package]
 name = "leptos_ws"
-version = "0.8.0"
-edition = "2021"
+version = "0.9.0"
+edition = "2024"
 license = "MIT"
 authors = ["Tim Persigehl <dev@timtom2016.com>"]
 description = "Leptos WS is a Websocket for the Leptos framework to support updates coordinated from the Server "
@@ -38,5 +38,8 @@ csr = ["leptos/csr",]
 hydrate = ["leptos/hydrate",]
 
 [package.metadata.docs.rs]
-all-features = true
+features = ["ssr"]
 rustdoc-args = ["--cfg", "docsrs"]
+
+[package.metadata.cargo-all-features]
+skip_feature_sets = [["ssr", "hydrate"], ["csr", "hydrate"], ["ssr", "csr"]]

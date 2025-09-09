@@ -8,7 +8,7 @@ pub use bidirectional::BiDirectionalSignal;
 pub use channel::ChannelSignal;
 use leptos::{
     prelude::*,
-    server_fn::{codec::JsonEncoding, BoxedStream, Websocket},
+    server_fn::{BoxedStream, Websocket, codec::JsonEncoding},
     task::spawn_local,
 };
 use messages::{BiDirectionalMessage, ChannelMessage, Messages};
@@ -24,57 +24,6 @@ mod read_only;
 mod ws_signals;
 
 pub mod traits;
-
-/// A type alias for a signal that synchronizes with the server.
-///
-/// `ServerSignal<T>` represents a reactive value that can be updated from the server
-/// and reflected in the client-side UI. The actual implementation differs based on
-/// whether the code is running on the server or the client.
-///
-/// # Type Parameters
-///
-/// * `T`: The type of value stored in the signal. This type must satisfy the following trait bounds:
-///   - `serde::Serialize`: For serialization when sending updates across the network.
-///   - `serde::Deserialize<'static>`: For deserialization when receiving updates.
-///   - `Clone`: To allow the value to be cloned when necessary.
-///   - `Send`: To ensure the value can be safely transferred across thread boundaries.
-///   - `Sync`: To allow the value to be safely shared between threads.
-///   These bounds ensure proper serialization, thread safety, and efficient handling of the signal's value.
-/// # Features
-///
-/// This type alias is conditionally defined based on the "ssr" feature flag:
-///
-/// - When the "ssr" feature is enabled (server-side rendering):
-///   `ServerSignal<T>` is an alias for `server_signal::ServerSignal<T>`, which is the
-///   server-side implementation capable of sending updates to connected clients.
-///
-/// - When the "hydrate" feature is enabled (client-side):
-///   `ServerSignal<T>` is an alias for `ClientSignal<T>`, which is the client-side
-///   implementation that receives updates from the server.
-///
-/// # Usage
-///
-/// On the server:
-/// ```rust,ignore
-/// #[cfg(feature = "ssr")]
-/// fn create_server_signal() -> ServerSignal<i32> {
-///     ServerSignal::new("counter", 0)
-/// }
-/// ```
-///
-/// On the client:
-/// ```rust,ignore
-/// #[cfg(any(feature = "csr", feature = "hydrate"))]
-/// fn use_server_signal() {
-///     let counter = ServerSignal::<i32>::new("counter", 0);
-///     // Use `counter.get()` to read the current value
-/// }
-/// ```
-///
-/// # Note
-///
-/// When using `ServerSignal`, ensure that you've set up the WebSocket connection
-/// using the `provide_websocket` function in your application's root component.
 
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 #[derive(Clone)]
@@ -117,7 +66,20 @@ impl ServerSignalWebSocket {
                                     ServerSignalMessage::EstablishResponse((name, value)) => {
                                         state_signals.set_json(&name, value.to_owned());
                                     }
-                                    ServerSignalMessage::Update(update) => {}
+                                    ServerSignalMessage::Update(update) => {
+                                        spawn_local({
+                                            let state_signals = state_signals.clone();
+                                            async move {
+                                                state_signals
+                                                    .update(
+                                                        update.get_name(),
+                                                        update.to_owned(),
+                                                        None,
+                                                    )
+                                                    .await;
+                                            }
+                                        });
+                                    }
                                 },
                                 Messages::BiDirectional(bidirectional) => match bidirectional {
                                     BiDirectionalMessage::Establish(_) => {
@@ -189,7 +151,7 @@ fn provide_websocket_inner() -> Option<()> {
 pub async fn leptos_ws_websocket(
     input: BoxedStream<Messages, ServerFnError>,
 ) -> Result<BoxedStream<Messages, ServerFnError>, ServerFnError> {
-    use futures::{channel::mpsc, SinkExt, StreamExt};
+    use futures::{SinkExt, StreamExt, channel::mpsc};
     let mut input = input;
     let (mut tx, rx) = mpsc::channel(1);
     let server_signals = use_context::<WsSignals>().unwrap();
@@ -259,10 +221,9 @@ pub async fn leptos_ws_websocket(
     Ok(rx.into())
 }
 use futures::{
-    channel::mpsc::{self, Sender},
     SinkExt, StreamExt,
+    channel::mpsc::{self, Sender},
 };
-use messages::SignalUpdate;
 
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 async fn handle_broadcasts_client(
