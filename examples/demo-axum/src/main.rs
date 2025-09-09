@@ -33,11 +33,11 @@ use leptos_axum::{generate_route_list_with_exclusions_and_ssg_and_context, Lepto
 #[cfg(feature = "ssr")]
 use leptos_axum::{handle_server_fns_with_context, AxumRouteListing};
 #[cfg(feature = "ssr")]
-use leptos_ws::server_signals::ServerSignals;
+use leptos_ws::WsSignals;
 #[cfg(feature = "ssr")]
 #[derive(Clone, FromRef)]
 pub struct AppState {
-    server_signals: ServerSignals,
+    server_signals: WsSignals,
     routes: Option<Vec<AxumRouteListing>>,
     options: LeptosOptions,
 }
@@ -114,7 +114,7 @@ async fn main() {
         }
     });
     simple_logger::init_with_level(log::Level::Debug).expect("couldn't initialize logging");
-    let server_signals = ServerSignals::new();
+    let server_signals = WsSignals::new();
 
     //let signal = ServerSignal::new("counter".to_string(), 1);
     // build our application with a route

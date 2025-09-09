@@ -3,87 +3,27 @@
 #![warn(clippy::nursery)]
 
 // #![feature(unboxed_closures)]
-#[cfg(any(feature = "csr", feature = "hydrate"))]
-use crate::client_signal::ClientSignal;
 use crate::messages::ServerSignalMessage;
-#[cfg(any(feature = "csr", feature = "hydrate"))]
-use client_signals::ClientSignals;
+pub use bidirectional::BiDirectionalSignal;
+pub use channel::ChannelSignal;
 use leptos::{
     prelude::*,
-    server_fn::{codec::JsonEncoding, BoxedStream, Websocket},
+    server_fn::{BoxedStream, Websocket, codec::JsonEncoding},
     task::spawn_local,
 };
-use messages::Messages;
-#[cfg(any(feature = "csr", feature = "hydrate"))]
+use messages::{BiDirectionalMessage, ChannelMessage, Messages};
+pub use read_only::ReadOnlySignal;
+
 use std::sync::{Arc, Mutex};
+pub use ws_signals::WsSignals;
+mod bidirectional;
+mod channel;
 pub mod error;
 pub mod messages;
-#[cfg(feature = "ssr")]
-mod server_signal;
+mod read_only;
+mod ws_signals;
 
-#[cfg(feature = "ssr")]
-pub mod server_signals;
-
-#[cfg(any(feature = "csr", feature = "hydrate"))]
-mod client_signal;
-
-#[cfg(any(feature = "csr", feature = "hydrate"))]
-mod client_signals;
-
-/// A type alias for a signal that synchronizes with the server.
-///
-/// `ServerSignal<T>` represents a reactive value that can be updated from the server
-/// and reflected in the client-side UI. The actual implementation differs based on
-/// whether the code is running on the server or the client.
-///
-/// # Type Parameters
-///
-/// * `T`: The type of value stored in the signal. This type must satisfy the following trait bounds:
-///   - `serde::Serialize`: For serialization when sending updates across the network.
-///   - `serde::Deserialize<'static>`: For deserialization when receiving updates.
-///   - `Clone`: To allow the value to be cloned when necessary.
-///   - `Send`: To ensure the value can be safely transferred across thread boundaries.
-///   - `Sync`: To allow the value to be safely shared between threads.
-///   These bounds ensure proper serialization, thread safety, and efficient handling of the signal's value.
-/// # Features
-///
-/// This type alias is conditionally defined based on the "ssr" feature flag:
-///
-/// - When the "ssr" feature is enabled (server-side rendering):
-///   `ServerSignal<T>` is an alias for `server_signal::ServerSignal<T>`, which is the
-///   server-side implementation capable of sending updates to connected clients.
-///
-/// - When the "hydrate" feature is enabled (client-side):
-///   `ServerSignal<T>` is an alias for `ClientSignal<T>`, which is the client-side
-///   implementation that receives updates from the server.
-///
-/// # Usage
-///
-/// On the server:
-/// ```rust,ignore
-/// #[cfg(feature = "ssr")]
-/// fn create_server_signal() -> ServerSignal<i32> {
-///     ServerSignal::new("counter", 0)
-/// }
-/// ```
-///
-/// On the client:
-/// ```rust,ignore
-/// #[cfg(any(feature = "csr", feature = "hydrate"))]
-/// fn use_server_signal() {
-///     let counter = ServerSignal::<i32>::new("counter", 0);
-///     // Use `counter.get()` to read the current value
-/// }
-/// ```
-///
-/// # Note
-///
-/// When using `ServerSignal`, ensure that you've set up the WebSocket connection
-/// using the `provide_websocket` function in your application's root component.
-#[cfg(feature = "ssr")]
-pub type ServerSignal<T> = server_signal::ServerSignal<T>;
-#[cfg(any(feature = "csr", feature = "hydrate"))]
-pub type ServerSignal<T> = ClientSignal<T>;
+pub mod traits;
 
 #[cfg(any(feature = "csr", feature = "hydrate"))]
 #[derive(Clone)]
@@ -102,9 +42,11 @@ impl ServerSignalWebSocket {
         let (tx, rx) = mpsc::channel(32);
 
         let delayed_msgs = Arc::default();
-        let state_signals = ClientSignals::new();
+        let state_signals = WsSignals::new();
+        let id = Arc::new(String::new());
         spawn_local({
             let state_signals = state_signals.clone();
+            let tx = tx.clone();
             async move {
                 match leptos_ws_websocket(rx.into()).await {
                     Ok(mut messages) => {
@@ -125,7 +67,56 @@ impl ServerSignalWebSocket {
                                         state_signals.set_json(&name, value.to_owned());
                                     }
                                     ServerSignalMessage::Update(update) => {
-                                        state_signals.update(update.get_name(), update.to_owned());
+                                        spawn_local({
+                                            let state_signals = state_signals.clone();
+                                            async move {
+                                                state_signals
+                                                    .update(
+                                                        update.get_name(),
+                                                        update.to_owned(),
+                                                        None,
+                                                    )
+                                                    .await;
+                                            }
+                                        });
+                                    }
+                                },
+                                Messages::BiDirectional(bidirectional) => match bidirectional {
+                                    BiDirectionalMessage::Establish(_) => {
+                                        // Usually client-to-server message, ignore if received
+                                    }
+                                    BiDirectionalMessage::EstablishResponse((name, value)) => {
+                                        state_signals.set_json(&name, value.to_owned());
+                                        let recv = state_signals.add_observer(&name).unwrap();
+                                        spawn_local(handle_broadcasts_client(recv, tx.clone()));
+                                    }
+                                    BiDirectionalMessage::Update(update) => {
+                                        spawn_local({
+                                            let state_signals = state_signals.clone();
+                                            let id = id.clone();
+                                            async move {
+                                                state_signals
+                                                    .update(
+                                                        update.get_name(),
+                                                        update.to_owned(),
+                                                        Some(id.to_string()),
+                                                    )
+                                                    .await;
+                                            }
+                                        });
+                                    }
+                                },
+                                Messages::Channel(channel) => match channel {
+                                    ChannelMessage::Establish(_) => {
+                                        // Usually client-to-server message, ignore if received
+                                    }
+                                    ChannelMessage::EstablishResponse(name) => {
+                                        let recv =
+                                            state_signals.add_observer_channel(&name).unwrap();
+                                        spawn_local(handle_broadcasts_client(recv, tx.clone()));
+                                    }
+                                    ChannelMessage::Message(name, value) => {
+                                        state_signals.handle_message(&name, value);
                                     }
                                 },
                             }
@@ -160,10 +151,11 @@ fn provide_websocket_inner() -> Option<()> {
 pub async fn leptos_ws_websocket(
     input: BoxedStream<Messages, ServerFnError>,
 ) -> Result<BoxedStream<Messages, ServerFnError>, ServerFnError> {
-    use futures::{channel::mpsc, SinkExt, StreamExt};
+    use futures::{SinkExt, StreamExt, channel::mpsc};
     let mut input = input;
     let (mut tx, rx) = mpsc::channel(1);
-    let server_signals = use_context::<crate::server_signals::ServerSignals>().unwrap();
+    let server_signals = use_context::<WsSignals>().unwrap();
+    let id = Arc::new(nanoid::nanoid!());
     // spawn a task to listen to the input stream of messages coming in over the websocket
     tokio::spawn(async move {
         while let Some(msg) = input.next().await {
@@ -173,18 +165,54 @@ pub async fn leptos_ws_websocket(
             match msg {
                 Messages::ServerSignal(server_msg) => match server_msg {
                     ServerSignalMessage::Establish(name) => {
-                        let recv = server_signals.add_observer(name.clone()).await.unwrap();
+                        let recv = server_signals.add_observer(&name).unwrap();
                         tx.send(Ok(Messages::ServerSignal(
                             ServerSignalMessage::EstablishResponse((
                                 name.clone(),
-                                server_signals.json(name.clone()).await.unwrap().unwrap(),
+                                server_signals.json(&name).unwrap().unwrap(),
                             )),
                         )))
                         .await
                         .unwrap();
-                        tokio::spawn(handle_broadcasts(recv, tx.clone()));
+                        tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
                     }
                     _ => leptos::logging::error!("Unexpected server signal message from client"),
+                },
+                Messages::BiDirectional(bidirectional) => match bidirectional {
+                    BiDirectionalMessage::Establish(name) => {
+                        let recv = server_signals.add_observer(&name).unwrap();
+                        tx.send(Ok(Messages::BiDirectional(
+                            BiDirectionalMessage::EstablishResponse((
+                                name.clone(),
+                                server_signals.json(&name).unwrap().unwrap(),
+                            )),
+                        )))
+                        .await
+                        .unwrap();
+                        tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                    }
+                    BiDirectionalMessage::Update(update) => {
+                        server_signals
+                            .update(update.get_name(), update.to_owned(), Some(id.to_string()))
+                            .await;
+                    }
+                    _ => leptos::logging::error!("Unexpected bi-directional message from client"),
+                },
+                Messages::Channel(channel) => match channel {
+                    ChannelMessage::Establish(name) => {
+                        let recv = server_signals.add_observer_channel(&name).unwrap();
+                        tx.send(Ok(Messages::Channel(ChannelMessage::EstablishResponse(
+                            name.clone(),
+                        ))))
+                        .await
+                        .unwrap();
+                        tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                    }
+
+                    ChannelMessage::Message(name, value) => {
+                        server_signals.handle_message(&name, value);
+                    }
+                    _ => leptos::logging::error!("Unexpected channel message from client"),
                 },
             }
         }
@@ -193,25 +221,33 @@ pub async fn leptos_ws_websocket(
     Ok(rx.into())
 }
 use futures::{
-    channel::mpsc::{self, Sender},
     SinkExt, StreamExt,
+    channel::mpsc::{self, Sender},
 };
-#[cfg(feature = "ssr")]
-use messages::ServerSignalUpdate;
 
-#[cfg(feature = "ssr")]
-async fn handle_broadcasts(
-    mut receiver: tokio::sync::broadcast::Receiver<ServerSignalUpdate>,
+#[cfg(any(feature = "csr", feature = "hydrate"))]
+async fn handle_broadcasts_client(
+    mut receiver: tokio::sync::broadcast::Receiver<(Option<String>, Messages)>,
     mut sink: Sender<Result<Messages, ServerFnError>>,
 ) {
     while let Ok(message) = receiver.recv().await {
-        if sink
-            .send(Ok(Messages::ServerSignal(ServerSignalMessage::Update(
-                message,
-            ))))
-            .await
-            .is_err()
-        {
+        if sink.send(Ok(message.1)).await.is_err() {
+            break;
+        };
+    }
+}
+
+#[cfg(feature = "ssr")]
+async fn handle_broadcasts(
+    id: String,
+    mut receiver: tokio::sync::broadcast::Receiver<(Option<String>, Messages)>,
+    mut sink: Sender<Result<Messages, ServerFnError>>,
+) {
+    while let Ok(message) = receiver.recv().await {
+        if message.0.is_some_and(|v| id == v) {
+            continue;
+        }
+        if sink.send(Ok(message.1)).await.is_err() {
             break;
         };
     }

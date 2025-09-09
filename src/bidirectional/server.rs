@@ -1,23 +1,24 @@
 use std::any::Any;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::panic::Location;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use crate::error::Error;
-use crate::messages::ServerSignalUpdate;
-use crate::server_signals::ServerSignals;
+use crate::messages::{BiDirectionalMessage, Messages, SignalUpdate};
+use crate::traits::WsSignalCore;
+use crate::ws_signals::WsSignals;
 use async_trait::async_trait;
 use futures::executor::block_on;
 use guards::{Plain, ReadGuard};
+use json_patch::Patch;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::broadcast::{channel, Receiver, Sender};
-use tokio::sync::RwLock;
+use tokio::sync::broadcast::{channel, Sender};
 
 /// A signal owned by the server which writes to the websocket when mutated.
 #[derive(Clone, Debug)]
-pub struct ServerSignal<T>
+pub struct ServerBidirectionalSignal<T>
 where
     T: Clone + Send + Sync + for<'de> Deserialize<'de>,
 {
@@ -25,79 +26,83 @@ where
     name: String,
     value: ArcRwSignal<T>,
     json_value: Arc<RwLock<Value>>,
-    observers: Arc<Sender<ServerSignalUpdate>>,
+    observers: Arc<Sender<(Option<String>, Messages)>>,
 }
 #[async_trait]
-pub trait ServerSignalTrait {
-    async fn add_observer(&self) -> Receiver<ServerSignalUpdate>;
-    async fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error>;
-    async fn update_if_changed(&self) -> Result<(), Error>;
-    fn json(&self) -> Result<Value, Error>;
-    fn as_any(&self) -> &dyn Any;
-    fn track(&self);
-}
-
-#[async_trait]
-impl<T> ServerSignalTrait for ServerSignal<T>
-where
-    T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static + Serialize,
+impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
+    for ServerBidirectionalSignal<T>
 {
-    async fn add_observer(&self) -> Receiver<ServerSignalUpdate> {
-        self.subscribe()
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn json(&self) -> Result<Value, Error> {
+        self.json_value
+            .read()
+            .map(|value| value.clone())
+            .map_err(|_| Error::AddingSignalFailed)
     }
 
-    async fn update_json(&self, patch: ServerSignalUpdate) -> Result<(), Error> {
-        let mut writer = self.json_value.write().await;
-        if json_patch::patch(writer.deref_mut(), patch.get_patch()).is_ok() {
-            //*self.value.write() = serde_json::from_value(writer.clone())?;
-            let _ = self.observers.send(patch);
+    async fn update_json(&self, patch: &Patch, id: Option<String>) -> Result<(), Error> {
+        let mut writer = self.json_value.write();
+
+        let Ok(mut writer) = writer.as_deref_mut() else {
+            return Err(Error::UpdateSignalFailed);
+        };
+
+        if json_patch::patch(&mut writer, patch).is_ok() {
+            if id.is_some() {
+                self.value.set(
+                    serde_json::from_value(writer.clone())
+                        .map_err(|err| Error::SerializationFailed(err))?,
+                );
+            }
+            let _ = self.observers.send((
+                id,
+                Messages::BiDirectional(BiDirectionalMessage::Update(
+                    SignalUpdate::new_from_patch(self.name.clone(), patch),
+                )),
+            ));
             Ok(())
         } else {
             Err(Error::UpdateSignalFailed)
         }
     }
-
-    async fn update_if_changed(&self) -> Result<(), Error> {
-        let json = self.json_value.read().await.clone();
-        let new_json = serde_json::to_value(self.value.get())?;
-        let mut res = Err(Error::UpdateSignalFailed);
-        if json != new_json {
-            res = self
-                .update_json(ServerSignalUpdate::new_from_json(
-                    self.name.clone(),
-                    &json,
-                    &new_json,
-                ))
-                .await;
-        }
-        res
+    fn set_json(&self, new_value: Value) -> Result<(), Error> {
+        let mut writer = self
+            .json_value
+            .write()
+            .map_err(|_| Error::UpdateSignalFailed)?;
+        *writer = new_value;
+        self.value.set(
+            serde_json::from_value(writer.clone())
+                .map_err(|err| Error::SerializationFailed(err))?,
+        );
+        Ok(())
     }
 
-    fn json(&self) -> Result<Value, Error> {
-        Ok(serde_json::to_value(self.value.get())?)
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    #[track_caller]
-    fn track(&self) {
-        self.value.track()
+    fn subscribe(
+        &self,
+    ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, Messages)>, Error> {
+        Ok(self.observers.subscribe())
     }
 }
 
-impl<T> ServerSignal<T>
+impl<T> ServerBidirectionalSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
     pub fn new(name: &str, value: T) -> Result<Self, Error> {
-        let mut signals = use_context::<ServerSignals>().ok_or(Error::MissingServerSignals)?;
-        if block_on(signals.contains(&name)) {
-            return Ok(block_on(signals.get_signal::<ServerSignal<T>>(name)).unwrap());
+        let mut signals = use_context::<WsSignals>().ok_or(Error::MissingServerSignals)?;
+        if signals.contains(&name) {
+            return Ok(signals
+                .get_signal::<ServerBidirectionalSignal<T>>(name)
+                .unwrap());
         }
         let (send, _) = channel(32);
-        let new_signal = ServerSignal {
+        let new_signal = ServerBidirectionalSignal {
             initial: value.clone(),
             name: name.to_owned(),
             value: ArcRwSignal::new(value.clone()),
@@ -105,12 +110,29 @@ where
             observers: Arc::new(send),
         };
         let signal = new_signal.clone();
-        block_on(signals.create_signal(name, new_signal)).unwrap();
+        signals
+            .create_signal(
+                name,
+                new_signal,
+                &Messages::BiDirectional(BiDirectionalMessage::Establish(name.to_owned())),
+            )
+            .unwrap();
         Ok(signal)
     }
 
-    pub fn subscribe(&self) -> Receiver<ServerSignalUpdate> {
-        self.observers.subscribe()
+    async fn update_if_changed(&self) -> Result<(), Error> {
+        let Ok(json) = self.json_value.read() else {
+            return Err(Error::UpdateSignalFailed);
+        };
+
+        let new_json = serde_json::to_value(self.value.get())?;
+        let mut res = Err(Error::UpdateSignalFailed);
+        if *json != new_json {
+            let patch = json_patch::diff(&json, &new_json);
+            drop(json);
+            res = self.update_json(&patch, None).await;
+        }
+        res
     }
     fn check_is_hydrating(&self) -> bool {
         #[cfg(feature = "ssr")]
@@ -130,7 +152,7 @@ where
     }
 }
 
-impl<T> Update for ServerSignal<T>
+impl<T> Update for ServerBidirectionalSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
@@ -150,7 +172,7 @@ where
     }
 }
 
-impl<T> DefinedAt for ServerSignal<T>
+impl<T> DefinedAt for ServerBidirectionalSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
@@ -159,7 +181,7 @@ where
     }
 }
 
-impl<T> ReadUntracked for ServerSignal<T>
+impl<T> ReadUntracked for ServerBidirectionalSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
@@ -177,7 +199,7 @@ where
     }
 }
 
-impl<T> Get for ServerSignal<T>
+impl<T> Get for ServerBidirectionalSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
@@ -192,7 +214,7 @@ where
     }
 }
 
-impl<T> Deref for ServerSignal<T>
+impl<T> Deref for ServerBidirectionalSignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {

@@ -7,27 +7,39 @@ use serde_json::Value;
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum Messages {
     ServerSignal(ServerSignalMessage),
-    // Hier können weitere Nachrichtentypen hinzugefügt werden
-    // ChatMessage(ChatMessage),
-    // StateSync(StateSyncMessage),
-    // etc.
+    BiDirectional(BiDirectionalMessage),
+    Channel(ChannelMessage),
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum ServerSignalMessage {
     Establish(String),
     EstablishResponse((String, Value)),
-    Update(ServerSignalUpdate),
+    Update(SignalUpdate),
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub enum BiDirectionalMessage {
+    Establish(String),
+    EstablishResponse((String, Value)),
+    Update(SignalUpdate),
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub enum ChannelMessage {
+    Establish(String),
+    EstablishResponse(String),
+    Message(String, Value),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ServerSignalUpdate {
+pub struct SignalUpdate {
     name: Cow<'static, str>,
     patch: Patch,
 }
 
-impl ServerSignalUpdate {
-    /// Creates a new [`ServerSignalUpdate`] from an old and new instance of `T`.
+impl SignalUpdate {
+    /// Creates a new [`SignalUpdate`] from an old and new instance of `T`.
     pub fn new<T>(
         name: impl Into<Cow<'static, str>>,
         old: &T,
@@ -39,18 +51,25 @@ impl ServerSignalUpdate {
         let left = serde_json::to_value(old)?;
         let right = serde_json::to_value(new)?;
         let patch = json_patch::diff(&left, &right);
-        Ok(ServerSignalUpdate {
+        Ok(SignalUpdate {
             name: name.into(),
             patch,
         })
     }
 
-    /// Creates a new [`ServerSignalUpdate`] from two json values.
+    /// Creates a new [`SignalUpdate`] from two json values.
     pub fn new_from_json(name: impl Into<Cow<'static, str>>, old: &Value, new: &Value) -> Self {
         let patch = json_patch::diff(old, new);
-        ServerSignalUpdate {
+        SignalUpdate {
             name: name.into(),
             patch,
+        }
+    }
+
+    pub fn new_from_patch(name: impl Into<Cow<'static, str>>, patch: &Patch) -> Self {
+        SignalUpdate {
+            name: name.into(),
+            patch: patch.clone(),
         }
     }
 

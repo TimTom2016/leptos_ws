@@ -3,13 +3,15 @@
 [![Crates.io](https://img.shields.io/crates/v/leptos_ws.svg)](https://crates.io/crates/leptos_ws)
 [![docs.rs](https://docs.rs/leptos_ws/badge.svg)](https://docs.rs/leptos_ws/)
 
-Leptos Websocket provides server signals for [Leptos](https://github.com/leptos-rs/leptos), keeping them in sync with the server through WebSockets. This enables real-time updates on the UI controlled by the server.
+Leptos Websocket provides real-time, reactive signals for [Leptos](https://github.com/leptos-rs/leptos), keeping them in sync with the server through WebSockets. This enables instant UI updates controlled by the server or shared between client and server.
 
 ## Features
 
-- **Server Signals**: Read-only signals on the client side, writable by the server.
+- **Server Signals**: Read-only on the client, writable by the server.
+- **Bidirectional Signals**: Read-write on both client and server; updates are synchronized in both directions.
+- **Channel Signals**: Message-based channels for sending and receiving discrete messages between client and server.
 - **Real-time Updates**: Changes to signals are sent through WebSockets as [JSON patches](https://docs.rs/json-patch/latest/json_patch/struct.Patch.html).
-- **Framework Integration**: Supports integration with the [Axum](https://github.com/tokio-rs/axum) web framework.
+- **Framework Integration**: Supports integration with [Axum](https://github.com/tokio-rs/axum) and [Actix Web](https://github.com/actix/actix-web).
 
 ## Installation
 
@@ -22,15 +24,14 @@ serde = { version = "1.0", features = ["derive"] }
 
 [features]
 hydrate = ["leptos_ws/hydrate"]
-ssr = ["leptos_ws/ssr", "leptos_ws/axum"]
+ssr = ["leptos_ws/ssr"]
 ```
 
 ## Usage
 
-### Client-side
-
 ```rust
 use leptos::prelude::*;
+use leptos_ws::ReadOnlySignal;
 use serde::{Deserialize, Serialize};
 
 #[component]
@@ -38,18 +39,32 @@ pub fn App() -> impl IntoView {
     // Connect to WebSocket
     leptos_ws::provide_websocket();
 
-    // Create server signal
-    let count = leptos_ws::ServerSignal::new("count", 0 as i32).unwrap();
+    // Create a read-only server signal (updated by the server)
+    let count = ReadOnlySignal::new("count", 0 as i32).unwrap();
 
     view! {
+        <button on:click=move |_| {
+            // Call the server function to start updating the count
+            leptos::spawn_local(async move {
+                update_count().await.unwrap();
+            });
+        }>"Start Counter"</button>
         <h1>"Count: " {move || count.get().to_string()}</h1>
     }
 }
+
+#[server]
+async fn update_count() -> Result<(), leptos::ServerFnError> {
+    use std::time::Duration;
+    use tokio::time::sleep;
+    let count = ReadOnlySignal::new("count", 0 as i32).unwrap();
+    for i in 0..100 {
+        count.update(|value| *value = i);
+        sleep(Duration::from_secs(1)).await;
+    }
+    Ok(())
+}
 ```
-
-### Server-side (Axum)
-
-Server-side implementation requires additional setup. Refer to the example for detailed examples.
 
 ## Feature Flags
 
@@ -60,6 +75,17 @@ Server-side implementation requires additional setup. Refer to the example for d
 ## Documentation
 
 For more detailed information, check out the [API documentation](https://docs.rs/leptos_ws/).
+
+## Compatible Leptos versions
+
+The `main` branch is compatible with the latest Leptos release.
+
+Compatibility of `leptos_ws` versions:
+
+| `leptos_ws` | `leptos` |
+| :--         | :--      |
+| `0.8`-`0.9` | `0.8`    |
+| `0.7`       | `0.7`    |
 
 ## Contributing
 
