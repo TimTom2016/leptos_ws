@@ -5,7 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::error::Error;
 use crate::messages::{Messages, ServerSignalMessage, SignalUpdate};
-use crate::traits::WsSignalCore;
+use crate::traits::{WsSignalCore, private};
 use crate::ws_signals::WsSignals;
 use async_trait::async_trait;
 use futures::executor::block_on;
@@ -14,13 +14,13 @@ use json_patch::Patch;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::broadcast::{channel, Sender};
+use tokio::sync::broadcast::{Sender, channel};
 
 /// A signal owned by the server which writes to the websocket when mutated.
 #[derive(Clone, Debug)]
 pub struct ServerReadOnlySignal<T>
 where
-    T: Clone + Send + Sync + for<'de> Deserialize<'de>,
+    T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>,
 {
     initial: T,
     name: String,
@@ -29,7 +29,7 @@ where
     observers: Arc<Sender<(Option<String>, Messages)>>,
 }
 #[async_trait]
-impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
+impl<T: Clone + Send + Serialize + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
     for ServerReadOnlySignal<T>
 {
     fn as_any(&self) -> &dyn Any {
@@ -143,6 +143,11 @@ where
         #[allow(unreachable_code)]
         false
     }
+
+    pub fn delete(&self) -> Result<(), Error> {
+        let mut signals = use_context::<WsSignals>().ok_or(Error::MissingServerSignals)?;
+        signals.delete_signal(&self.name)
+    }
 }
 
 impl<T> Update for ServerReadOnlySignal<T>
@@ -215,5 +220,18 @@ where
 
     fn deref(&self) -> &Self::Target {
         &self.value
+    }
+}
+
+impl<T> private::DeleteTrait for ServerReadOnlySignal<T>
+where
+    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
+{
+    fn delete(&self) -> Result<(), Error> {
+        self.observers.send((
+            None,
+            Messages::ServerSignal(ServerSignalMessage::Delete(self.name.clone())),
+        ));
+        Ok(())
     }
 }

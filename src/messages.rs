@@ -16,6 +16,7 @@ pub enum ServerSignalMessage {
     Establish(String),
     EstablishResponse((String, Value)),
     Update(SignalUpdate),
+    Delete(String),
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -23,6 +24,7 @@ pub enum BiDirectionalMessage {
     Establish(String),
     EstablishResponse((String, Value)),
     Update(SignalUpdate),
+    Delete(String),
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -30,6 +32,7 @@ pub enum ChannelMessage {
     Establish(String),
     EstablishResponse(String),
     Message(String, Value),
+    Delete(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

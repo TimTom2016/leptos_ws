@@ -153,4 +153,20 @@ impl WsSignals {
             .get_mut(name)
             .map(|value| value.set_json(new_value))
     }
+
+    pub fn delete_signal(&mut self, name: &str) -> Result<(), Error> {
+        if let Some(signal) = self.signals.remove(name) {
+            signal.1.delete();
+            return Ok(());
+        }
+        Err(Error::DeletingSignalFailed)
+    }
+
+    pub fn delete_channel(&mut self, name: &str) -> Result<(), Error> {
+        if let Some(signal) = self.channels.remove(name) {
+            signal.1.delete();
+            return Ok(());
+        }
+        Err(Error::DeletingChannelHandlerFailed)
+    }
 }

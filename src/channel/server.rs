@@ -3,19 +3,19 @@ use std::sync::{Arc, RwLock};
 
 use crate::error::Error;
 use crate::messages::{ChannelMessage, Messages};
-use crate::traits::ChannelSignalTrait;
+use crate::traits::{ChannelSignalTrait, private};
 use crate::ws_signals::WsSignals;
 use async_trait::async_trait;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::broadcast::{channel, Sender};
+use tokio::sync::broadcast::{Sender, channel};
 
 /// A signal owned by the server which writes to the websocket when mutated.
 #[derive(Clone)]
 pub struct ServerChannelSignal<T>
 where
-    T: Clone + Send + Sync + for<'de> Deserialize<'de>,
+    T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>,
 {
     name: String,
     observers: Arc<Sender<(Option<String>, Messages)>>,
@@ -118,6 +118,24 @@ where
             Messages::Channel(ChannelMessage::Message(self.name.clone(), message)),
         ));
 
+        Ok(())
+    }
+
+    pub fn delete(&self) -> Result<(), Error> {
+        let mut signals = use_context::<WsSignals>().ok_or(Error::MissingServerSignals)?;
+        signals.delete_channel(&self.name)
+    }
+}
+
+impl<T> private::DeleteTrait for ServerChannelSignal<T>
+where
+    T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static,
+{
+    fn delete(&self) -> Result<(), Error> {
+        self.observers.send((
+            None,
+            Messages::Channel(ChannelMessage::Delete(self.name.clone())),
+        ));
         Ok(())
     }
 }
