@@ -1,5 +1,5 @@
 use crate::messages::{ChannelMessage, Messages};
-use crate::traits::ChannelSignalTrait;
+use crate::traits::{ChannelSignalTrait, private};
 use crate::{error::Error, ws_signals::WsSignals};
 use async_trait::async_trait;
 use leptos::prelude::*;
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::any::Any;
 use std::sync::{Arc, RwLock};
-use tokio::sync::broadcast::{channel, Sender};
+use tokio::sync::broadcast::{Sender, channel};
 
 #[derive(Clone)]
 pub struct ClientChannelSignal<T>
@@ -20,7 +20,7 @@ where
 }
 
 #[async_trait]
-impl<T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static> ChannelSignalTrait
+impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> ChannelSignalTrait
     for ClientChannelSignal<T>
 {
     // fn send_to_server(&self, data: T) -> Result<(), Error> {
@@ -127,5 +127,14 @@ where
         ));
 
         Ok(())
+    }
+}
+
+impl<T> private::DeleteTrait for ClientChannelSignal<T>
+where
+    T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
+{
+    fn delete(&self) -> Result<(), Error> {
+        Err(Error::NotAvailableOnClient)
     }
 }

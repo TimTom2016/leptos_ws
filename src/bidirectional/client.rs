@@ -1,5 +1,5 @@
 use crate::messages::{BiDirectionalMessage, Messages, SignalUpdate};
-use crate::traits::WsSignalCore;
+use crate::traits::{WsSignalCore, private};
 use crate::{error::Error, ws_signals::WsSignals};
 use async_trait::async_trait;
 use futures::executor::block_on;
@@ -12,7 +12,7 @@ use std::{
     ops::{Deref, DerefMut},
     sync::{Arc, RwLock},
 };
-use tokio::sync::broadcast::{channel, Sender};
+use tokio::sync::broadcast::{Sender, channel};
 
 #[derive(Clone, Debug)]
 pub struct ClientBidirectionalSignal<T>
@@ -160,5 +160,14 @@ where
 
     fn deref(&self) -> &Self::Target {
         &self.value
+    }
+}
+
+impl<T> private::DeleteTrait for ClientBidirectionalSignal<T>
+where
+    T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
+{
+    fn delete(&self) -> Result<(), Error> {
+        Err(Error::NotAvailableOnClient)
     }
 }

@@ -45,7 +45,7 @@ impl ServerSignalWebSocket {
         let state_signals = WsSignals::new();
         let id = Arc::new(String::new());
         spawn_local({
-            let state_signals = state_signals.clone();
+            let mut state_signals = state_signals.clone();
             let tx = tx.clone();
             async move {
                 match leptos_ws_websocket(rx.into()).await {
@@ -80,6 +80,9 @@ impl ServerSignalWebSocket {
                                             }
                                         });
                                     }
+                                    ServerSignalMessage::Delete(name) => {
+                                        state_signals.delete_signal(&name);
+                                    }
                                 },
                                 Messages::BiDirectional(bidirectional) => match bidirectional {
                                     BiDirectionalMessage::Establish(_) => {
@@ -105,6 +108,9 @@ impl ServerSignalWebSocket {
                                             }
                                         });
                                     }
+                                    BiDirectionalMessage::Delete(name) => {
+                                        state_signals.delete_signal(&name);
+                                    }
                                 },
                                 Messages::Channel(channel) => match channel {
                                     ChannelMessage::Establish(_) => {
@@ -117,6 +123,9 @@ impl ServerSignalWebSocket {
                                     }
                                     ChannelMessage::Message(name, value) => {
                                         state_signals.handle_message(&name, value);
+                                    }
+                                    ChannelMessage::Delete(name) => {
+                                        state_signals.delete_channel(&name);
                                     }
                                 },
                             }
@@ -154,7 +163,7 @@ pub async fn leptos_ws_websocket(
     use futures::{SinkExt, StreamExt, channel::mpsc};
     let mut input = input;
     let (mut tx, rx) = mpsc::channel(1);
-    let server_signals = use_context::<WsSignals>().unwrap();
+    let mut server_signals = use_context::<WsSignals>().unwrap();
     let id = Arc::new(nanoid::nanoid!());
     // spawn a task to listen to the input stream of messages coming in over the websocket
     tokio::spawn(async move {
@@ -253,7 +262,7 @@ async fn handle_broadcasts(
     }
 }
 
-#[cfg(feature = "ssr")]
+#[cfg(all(feature = "ssr", not(any(feature = "hydrate", feature = "csr"))))]
 #[inline]
 fn provide_websocket_inner() -> Option<()> {
     None

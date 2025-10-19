@@ -44,7 +44,7 @@ impl WsSignals {
             }
         }
 
-        #[cfg(feature = "ssr")]
+        #[cfg(all(feature = "ssr", not(any(feature = "hydrate", feature = "csr"))))]
         {
             if self
                 .signals
@@ -79,7 +79,7 @@ impl WsSignals {
             }
         }
 
-        #[cfg(feature = "ssr")]
+        #[cfg(all(feature = "ssr", not(any(feature = "hydrate", feature = "csr"))))]
         {
             if self
                 .channels
@@ -152,5 +152,21 @@ impl WsSignals {
         self.signals
             .get_mut(name)
             .map(|value| value.set_json(new_value))
+    }
+
+    pub fn delete_signal(&mut self, name: &str) -> Result<(), Error> {
+        if let Some(signal) = self.signals.remove(name) {
+            signal.1.delete();
+            return Ok(());
+        }
+        Err(Error::DeletingSignalFailed)
+    }
+
+    pub fn delete_channel(&mut self, name: &str) -> Result<(), Error> {
+        if let Some(signal) = self.channels.remove(name) {
+            signal.1.delete();
+            return Ok(());
+        }
+        Err(Error::DeletingChannelHandlerFailed)
     }
 }

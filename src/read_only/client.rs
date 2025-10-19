@@ -1,5 +1,5 @@
 use crate::messages::{Messages, ServerSignalMessage};
-use crate::traits::WsSignalCore;
+use crate::traits::{WsSignalCore, private};
 use crate::{error::Error, ws_signals::WsSignals};
 use async_trait::async_trait;
 use json_patch::Patch;
@@ -15,7 +15,7 @@ use std::{
 #[derive(Clone, Debug)]
 pub struct ClientReadOnlySignal<T>
 where
-    T: Clone + Send + Sync,
+    T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>,
 {
     name: String,
     value: ArcRwSignal<T>,
@@ -23,7 +23,7 @@ where
 }
 
 #[async_trait]
-impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static> WsSignalCore
+impl<T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static> WsSignalCore
     for ClientReadOnlySignal<T>
 {
     fn as_any(&self) -> &dyn Any {
@@ -111,5 +111,13 @@ where
 
     fn deref(&self) -> &Self::Target {
         &self.value
+    }
+}
+impl<T> private::DeleteTrait for ClientReadOnlySignal<T>
+where
+    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
+{
+    fn delete(&self) -> Result<(), Error> {
+        Err(Error::NotAvailableOnClient)
     }
 }
