@@ -44,7 +44,7 @@ impl WsSignals {
             }
         }
 
-        #[cfg(feature = "ssr")]
+        #[cfg(all(feature = "ssr", not(any(feature = "hydrate", feature = "csr"))))]
         {
             if self
                 .signals
@@ -79,7 +79,7 @@ impl WsSignals {
             }
         }
 
-        #[cfg(feature = "ssr")]
+        #[cfg(all(feature = "ssr", not(any(feature = "hydrate", feature = "csr"))))]
         {
             if self
                 .channels

@@ -262,7 +262,7 @@ async fn handle_broadcasts(
     }
 }
 
-#[cfg(feature = "ssr")]
+#[cfg(all(feature = "ssr", not(any(feature = "hydrate", feature = "csr"))))]
 #[inline]
 fn provide_websocket_inner() -> Option<()> {
     None
