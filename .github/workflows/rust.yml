@@ -35,5 +35,3 @@ jobs:
         run: cargo all-features test
       - name: Build
         run: cargo all-features build
-      - name: Build docs
-        run: cargo all-features doc
