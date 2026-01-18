@@ -30,7 +30,6 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-bins-
       - name: install tools
         if: steps.cache.outputs.cache_hit != 'true'
-        run:
-          run: cargo install cargo-all-features
+        run: cargo install cargo-all-features
       - name: Run Tests
         run: cargo all-features build
