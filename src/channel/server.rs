@@ -55,6 +55,10 @@ where
 {
     pub fn new(name: &str) -> Result<Self, Error> {
         let mut signals = use_context::<WsSignals>().ok_or(Error::MissingServerSignals)?;
+        Self::new_with_context(&mut signals, name)
+    }
+
+    pub fn new_with_context(signals: &mut WsSignals, name: &str) -> Result<Self, Error> {
         if let Some(signal) = signals.get_channel::<ServerChannelSignal<T>>(name) {
             return Ok(signal);
         }

@@ -90,6 +90,10 @@ where
 {
     pub fn new(name: &str, value: T) -> Result<Self, Error> {
         let mut signals = use_context::<WsSignals>().ok_or(Error::MissingServerSignals)?;
+        Self::new_with_context(&mut signals, name, value)
+    }
+
+    pub fn new_with_context(signals: &mut WsSignals, name: &str, value: T) -> Result<Self, Error> {
         if signals.contains(&name) {
             return Ok(signals.get_signal::<ServerReadOnlySignal<T>>(name).unwrap());
         }

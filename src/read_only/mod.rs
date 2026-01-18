@@ -19,7 +19,18 @@ mod server;
 /// ```rust,ignore
 /// #[cfg(feature = "ssr")]
 /// fn create_server_signal() -> ReadOnlySignal<i32> {
-///     ReadOnlySignal::new("counter", 0)
+///     ReadOnlySignal::new("counter", 0).unwrap()
+/// }
+/// ```
+/// On the server, while outside of a leptos server function context, eg in an Actix or Axum
+/// handler:
+/// ```rust
+/// #[cfg(feature = "ssr")]
+/// use leptos_ws::ReadOnlySignal;
+/// fn create_server_signal() -> ReadOnlySignal<i32> {
+///     # fn get_signals_from_actix_or_axum() -> leptos_ws::WsSignals { leptos_ws::WsSignals::new() }
+///     let mut signals = get_signals_from_actix_or_axum(); // get it from app state
+///     ReadOnlySignal::new_with_context(&mut signals, "counter", 0).unwrap()
 /// }
 /// ```
 ///
