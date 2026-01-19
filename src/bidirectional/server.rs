@@ -96,6 +96,12 @@ where
 {
     pub fn new(name: &str, value: T) -> Result<Self, Error> {
         let mut signals = use_context::<WsSignals>().ok_or(Error::MissingServerSignals)?;
+        Self::new_with_context(&mut signals, name, value)
+    }
+
+    // Can be called in regular actix or axum handlers passing in the WsSignals that are kept in
+    // the app-state
+    pub fn new_with_context(signals: &mut WsSignals, name: &str, value: T) -> Result<Self, Error> {
         if signals.contains(&name) {
             return Ok(signals
                 .get_signal::<ServerBidirectionalSignal<T>>(name)

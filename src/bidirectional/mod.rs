@@ -20,7 +20,18 @@ mod server;
 /// ```rust,ignore
 /// // Create a bidirectional signal named "count_bi"
 /// let count_bi = BiDirectionalSignal::<i32>::new("count_bi", 0).unwrap();
+/// ```
+/// On the server, if outside of a leptos server function context, eg in an Actix or Axum
+/// handler:
+/// ```rust
+/// #[cfg(feature = "ssr")]
+/// use leptos_ws::BiDirectionalSignal;
+/// # fn get_signals_from_actix_or_axum() -> leptos_ws::WsSignals { leptos_ws::WsSignals::new() }
+/// let mut signals = get_signals_from_actix_or_axum(); // get it from app state
+/// let count_bi = BiDirectionalSignal::<i32>::new_with_context(&mut signals, "count_bi", 0).unwrap();
+/// ```
 ///
+/// ```rust,ignore
 /// // On the client: update the value
 /// count_bi.update(|value| *value += 1);
 ///

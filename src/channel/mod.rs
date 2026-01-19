@@ -20,7 +20,18 @@ mod server;
 /// ```rust,ignore
 /// // Create a channel signal named "echo"
 /// let echo_channel = ChannelSignal::<String>::new("echo").unwrap();
+/// ```
+/// On the server, if outside of a leptos server function context, eg in an Actix or Axum
+/// handler:
+/// ```rust
+/// #[cfg(feature = "ssr")]
+/// use leptos_ws::ChannelSignal;
+///     # fn get_signals_from_actix_or_axum() -> leptos_ws::WsSignals { leptos_ws::WsSignals::new() }
+///     let mut signals = get_signals_from_actix_or_axum(); // get it from app state
+///     let echo_channel = ChannelSignal::<String>::new_with_context(&mut signals, "echo").unwrap();
+/// ```
 ///
+/// ```rust,ignore
 /// // On the client: listen for messages from the server
 /// echo_channel.on_client(move |msg: &String| {
 ///     // Handle incoming message
