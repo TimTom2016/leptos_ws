@@ -4,7 +4,9 @@
 
 // #![feature(unboxed_closures)]
 use crate::messages::ServerSignalMessage;
+#[cfg(any(feature = "csr", feature = "hydrate", feature = "ssr"))]
 pub use bidirectional::BiDirectionalSignal;
+#[cfg(any(feature = "csr", feature = "hydrate", feature = "ssr"))]
 pub use channel::ChannelSignal;
 use leptos::{
     prelude::*,
@@ -12,6 +14,7 @@ use leptos::{
     task::spawn_local,
 };
 use messages::{BiDirectionalMessage, ChannelMessage, Messages};
+#[cfg(any(feature = "csr", feature = "hydrate", feature = "ssr"))]
 pub use read_only::ReadOnlySignal;
 
 use std::sync::{Arc, Mutex};
@@ -306,6 +309,7 @@ fn provide_websocket_inner() -> Option<()> {
 ///
 /// This function should be called in the root component of your Leptos application
 /// to ensure the WebSocket connection is available throughout the app.
+#[cfg(any(feature = "csr", feature = "hydrate", feature = "ssr"))]
 pub fn provide_websocket() -> Option<()> {
     provide_websocket_inner()
 }

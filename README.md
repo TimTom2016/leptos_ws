@@ -31,12 +31,15 @@ ssr = ["leptos_ws/ssr"]
 
 ```rust
 use leptos::prelude::*;
+#[cfg(any(feature = "ssr", feature = "hydrate"))]
 use leptos_ws::ReadOnlySignal;
 use serde::{Deserialize, Serialize};
 
 #[component]
+#[cfg(feature = "hydrate")]
 pub fn App() -> impl IntoView {
     // Connect to WebSocket
+    
     leptos_ws::provide_websocket();
 
     // Create a read-only server signal (updated by the server)
@@ -45,7 +48,7 @@ pub fn App() -> impl IntoView {
     view! {
         <button on:click=move |_| {
             // Call the server function to start updating the count
-            leptos::spawn_local(async move {
+            leptos::task::spawn_local(async move {
                 update_count().await.unwrap();
             });
         }>"Start Counter"</button>
@@ -54,7 +57,8 @@ pub fn App() -> impl IntoView {
 }
 
 #[server]
-async fn update_count() -> Result<(), leptos::ServerFnError> {
+async fn update_count() -> Result<(), leptos::prelude::ServerFnError> {
+#[cfg(feature = "ssr")]
     use std::time::Duration;
     use tokio::time::sleep;
     let count = ReadOnlySignal::new("count", 0 as i32).unwrap();

@@ -31,6 +31,8 @@ tokio = { version = "1.38.0", features = ["sync"] }
 dashmap = "6.1.0"
 nanoid = {version= "0.4.0", optional = true}
 
+[dev-dependencies]
+tokio = { version = "1.38.0", features = ["time"] }
 [features]
 default = []
 ssr = ["leptos/ssr", "dep:nanoid","tokio/rt-multi-thread"]
