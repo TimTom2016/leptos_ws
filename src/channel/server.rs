@@ -77,23 +77,6 @@ where
         Ok(signal)
     }
 
-    fn check_is_hydrating(&self) -> bool {
-        #[cfg(feature = "ssr")]
-        {
-            let owner = match Owner::current() {
-                Some(owner) => owner,
-                None => return false,
-            };
-            let shared_context = match owner.shared_context() {
-                Some(shared_context) => shared_context,
-                None => return false,
-            };
-            return shared_context.get_is_hydrating() || !shared_context.during_hydration();
-        }
-        #[allow(unreachable_code)]
-        false
-    }
-
     /// Register a callback that gets called when a message arrives on the server side
     pub fn on_server<F>(&self, callback: F) -> Result<(), Error>
     where
