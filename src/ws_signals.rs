@@ -54,6 +54,8 @@ impl WsSignals {
                 Entry::Occupied(_) => Err(Error::AddingSignalFailed),
             }
         }
+        #[cfg(not(any(feature = "ssr", feature = "hydrate", feature = "csr")))]
+        return Err(Error::AddingSignalFailed);
     }
 
     pub fn create_channel<T>(&mut self, name: &str, value: T, msg: &Messages) -> Result<(), Error>
@@ -86,18 +88,20 @@ impl WsSignals {
                 Entry::Occupied(_) => Err(Error::AddingSignalFailed),
             }
         }
+        #[cfg(not(any(feature = "ssr", feature = "hydrate", feature = "csr")))]
+        return Err(Error::AddingSignalFailed);
     }
 
     pub fn get_signal<T: Clone + 'static>(&mut self, name: &str) -> Option<T> {
         self.signals
             .get_mut(name)
-            .map(|value| value.as_any().downcast_ref::<T>().unwrap().clone())
+            .and_then(|value| value.as_any().downcast_ref::<T>().cloned())
     }
 
     pub fn get_channel<T: Clone + 'static>(&mut self, name: &str) -> Option<T> {
         self.channels
             .get_mut(name)
-            .map(|value| value.as_any().downcast_ref::<T>().unwrap().clone())
+            .and_then(|value| value.as_any().downcast_ref::<T>().cloned())
     }
 
     pub fn contains(&self, name: &str) -> bool {
@@ -151,7 +155,7 @@ impl WsSignals {
 
     pub fn delete_channel(&mut self, name: &str) -> Result<(), Error> {
         if let Some(signal) = self.channels.remove(name) {
-            signal.1.delete();
+            let _ = signal.1.delete();
             return Ok(());
         }
         Err(Error::DeletingChannelHandlerFailed)

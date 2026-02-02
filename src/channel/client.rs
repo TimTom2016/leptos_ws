@@ -83,11 +83,10 @@ where
     }
 
     /// Register a callback that gets called when a message arrives on the server side
-    pub fn on_server<F>(&self, _callback: F) -> Result<(), Error>
+    pub fn on_server<F>(&self, _callback: F)
     where
         F: Fn(&T) + Send + Sync + 'static,
     {
-        Ok(())
     }
 
     /// Register a callback that gets called when a message arrives on the client side

@@ -172,6 +172,15 @@ where
     }
 }
 
+impl<T> IsDisposed for ServerReadOnlySignal<T>
+where
+    T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
+{
+    fn is_disposed(&self) -> bool {
+        self.value.is_disposed()
+    }
+}
+
 impl<T> DefinedAt for ServerReadOnlySignal<T>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,

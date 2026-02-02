@@ -121,18 +121,17 @@ where
     }
 
     async fn update_if_changed(&self) -> Result<(), Error> {
-        let Ok(json) = self.json_value.read() else {
-            return Err(Error::UpdateSignalFailed);
-        };
-
-        let new_json = serde_json::to_value(self.value.get())?;
-        if *json == new_json {
-            Err(Error::UpdateSignalFailed)
-        } else {
+        let patch = {
+            let json = self.json_value.read().map_err(|_| Error::UpdateSignalFailed)?;
+            let new_json = serde_json::to_value(self.value.get())?;
+            if *json == new_json {
+                return Err(Error::UpdateSignalFailed);
+            }
             let patch = json_patch::diff(&json, &new_json);
             drop(json);
-            self.update_json(&patch, None).await
-        }
+            patch
+        };
+        self.update_json(&patch, None).await
     }
 }
 

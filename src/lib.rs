@@ -68,21 +68,21 @@ impl ServerSignalWebSocket {
     /// # Panics
     /// Panics if the lock is poisoned.
     pub fn set_on_disconnect(&self, on_disconnect: impl Fn() + Send + Sync + 'static) {
-        *self.on_disconnect.lock().unwrap() = Some(Box::new(on_disconnect));
+        *self.on_disconnect.lock().expect("poisoned lock") = Some(Box::new(on_disconnect));
     }
 
     /// Set a callback to be called when the websocket connection is reestablished.
     /// # Panics
     /// Panics if the lock is poisoned.
     pub fn set_on_reconnect(&self, on_reconnect: impl Fn() + Send + Sync + 'static) {
-        *self.on_reconnect.lock().unwrap() = Some(Box::new(on_reconnect));
+        *self.on_reconnect.lock().expect("poisoned lock") = Some(Box::new(on_reconnect));
     }
 
     /// Set a callback to be called when the websocket connection is first established.
     /// # Panics
     /// Panics if the lock is poisoned.
     pub fn set_on_connect(&self, on_connect: impl Fn() + Send + Sync + 'static) {
-        *self.on_connect.lock().unwrap() = Some(Box::new(on_connect));
+        *self.on_connect.lock().expect("poisoned lock") = Some(Box::new(on_connect));
     }
 }
 #[cfg(any(feature = "csr", feature = "hydrate"))]
@@ -105,7 +105,6 @@ impl Default for ServerSignalWebSocket {
             let mut state_signals = state_signals.clone();
             let delayed_msgs = delayed_msgs.clone();
             let send_arc = send.clone();
-            let first_connect = first_connect.clone();
             spawn_local(async move {
                 use std::time::Duration;
                 loop {
@@ -127,12 +126,12 @@ impl Default for ServerSignalWebSocket {
                                 }
                             }
 
-                            let mut first = first_connect.lock().unwrap();
-                            let is_first_connect = *first;
-                            if *first {
+                            let is_first_connect = {
+                                let mut first = first_connect.lock().expect("poisoned lock");
+                                let was_first = *first;
                                 *first = false;
-                            }
-                            drop(first);
+                                was_first
+                            };
 
                             if !is_first_connect {
                                 for message in state_signals.get_reconnect_messages() {
@@ -141,10 +140,10 @@ impl Default for ServerSignalWebSocket {
                             }
 
                             // Fire appropriate connection callback
-                            if is_first_connect {
-                                if let Some(ref on_connect) = *on_connect.lock().unwrap() {
-                                    on_connect();
-                                }
+                            if is_first_connect
+                                && let Some(ref on_connect) = *on_connect.lock().expect("poisoned lock")
+                            {
+                                on_connect();
                             }
 
                             let mut first_message_received = false;
@@ -155,7 +154,7 @@ impl Default for ServerSignalWebSocket {
 
                                 // Fire on_reconnect after first successful message (confirms connection is working)
                                 if !first_message_received && !is_first_connect {
-                                    if let Some(ref on_reconnect) = *on_reconnect.lock().unwrap() {
+                                    if let Some(ref on_reconnect) = *on_reconnect.lock().expect("poisoned lock") {
                                         on_reconnect();
                                     }
                                     first_message_received = true;
@@ -236,7 +235,7 @@ impl Default for ServerSignalWebSocket {
                         }
                         Err(e) => leptos::logging::error!("{e}"),
                     }
-                    if let Some(ref on_disconnect) = *on_disconnect.lock().unwrap() {
+                    if let Some(ref on_disconnect) = *on_disconnect.lock().expect("poisoned lock") {
                         on_disconnect();
                     }
                     // connection lost - wait and retry
@@ -277,8 +276,12 @@ pub async fn leptos_ws_websocket(
     use futures::{SinkExt, StreamExt, channel::mpsc};
     let mut input = input;
     let (mut tx, rx) = mpsc::channel(1);
-    let server_signals = use_context::<WsSignals>().unwrap();
+    let Some(server_signals) = use_context::<WsSignals>() else {
+        leptos::logging::error!("WsSignals not found in context");
+        return Err(ServerFnError::new("WsSignals not found in context"));
+    };
     let id = Arc::new(nanoid::nanoid!());
+    tracing::info!(connection_id = %id, "new WebSocket connection established");
     // spawn a task to listen to the input stream of messages coming in over the websocket
     tokio::spawn(async move {
         while let Some(msg) = input.next().await {
@@ -288,33 +291,58 @@ pub async fn leptos_ws_websocket(
             match msg {
                 Messages::ServerSignal(server_msg) => match server_msg {
                     ServerSignalMessage::Establish(name) => {
-                        let recv = server_signals.add_observer(&name).unwrap();
-                        tx.send(Ok(Messages::ServerSignal(
+                        tracing::debug!(connection_id = %id, signal_name = %name, "client establishing server signal");
+                        let Some(recv) = server_signals.add_observer(&name) else {
+                            leptos::logging::error!("Signal '{}' not found", name);
+                            continue;
+                        };
+                        let Some(Ok(value)) = server_signals.json(&name) else {
+                            leptos::logging::error!("Failed to get JSON for signal '{}'", name);
+                            continue;
+                        };
+                        if tx.send(Ok(Messages::ServerSignal(
                             ServerSignalMessage::EstablishResponse((
                                 name.clone(),
-                                server_signals.json(&name).unwrap().unwrap(),
+                                value,
                             )),
                         )))
                         .await
-                        .unwrap();
+                        .is_err()
+                        {
+                            leptos::logging::error!("Failed to send EstablishResponse to client");
+                            break;
+                        }
                         tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
                     }
                     _ => leptos::logging::error!("Unexpected server signal message from client"),
                 },
                 Messages::BiDirectional(bidirectional) => match bidirectional {
                     BiDirectionalMessage::Establish(name) => {
-                        let recv = server_signals.add_observer(&name).unwrap();
-                        tx.send(Ok(Messages::BiDirectional(
+                        tracing::debug!(connection_id = %id, signal_name = %name, "client establishing bidirectional signal");
+                        let Some(recv) = server_signals.add_observer(&name) else {
+                            leptos::logging::error!("Bidirectional signal '{}' not found", name);
+                            continue;
+                        };
+                        let Some(Ok(value)) = server_signals.json(&name) else {
+                            leptos::logging::error!("Failed to get JSON for bidirectional signal '{}'", name);
+                            continue;
+                        };
+                        if tx.send(Ok(Messages::BiDirectional(
                             BiDirectionalMessage::EstablishResponse((
                                 name.clone(),
-                                server_signals.json(&name).unwrap().unwrap(),
+                                value,
                             )),
                         )))
                         .await
-                        .unwrap();
+                        .is_err()
+                        {
+                            leptos::logging::error!("Failed to send EstablishResponse to client");
+                            break;
+                        }
                         tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
                     }
                     BiDirectionalMessage::Update(update) => {
+                        tracing::debug!(connection_id = %id, signal_name = %update.get_name().clone(), "client sent bidirectional update");
                         server_signals
                             .update(&update.get_name().clone(), update, Some(id.to_string()))
                             .await;
@@ -323,22 +351,32 @@ pub async fn leptos_ws_websocket(
                 },
                 Messages::Channel(channel) => match channel {
                     ChannelMessage::Establish(name) => {
-                        let recv = server_signals.add_observer_channel(&name).unwrap();
-                        tx.send(Ok(Messages::Channel(ChannelMessage::EstablishResponse(
+                        tracing::debug!(connection_id = %id, channel_name = %name, "client establishing channel");
+                        let Some(recv) = server_signals.add_observer_channel(&name) else {
+                            leptos::logging::error!("Channel '{}' not found", name);
+                            continue;
+                        };
+                        if tx.send(Ok(Messages::Channel(ChannelMessage::EstablishResponse(
                             name.clone(),
                         ))))
                         .await
-                        .unwrap();
+                        .is_err()
+                        {
+                            leptos::logging::error!("Failed to send EstablishResponse to client");
+                            break;
+                        }
                         tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
                     }
 
                     ChannelMessage::Message(name, value) => {
+                        tracing::debug!(connection_id = %id, channel_name = %name, "client sent channel message");
                         server_signals.handle_message(&name, value);
                     }
                     _ => leptos::logging::error!("Unexpected channel message from client"),
                 },
             }
         }
+        tracing::info!(connection_id = %id, "WebSocket client disconnected");
     });
 
     Ok(rx.into())
@@ -353,9 +391,15 @@ async fn handle_broadcasts_client(
     mut receiver: tokio::sync::broadcast::Receiver<(Option<String>, Messages)>,
     mut sink: Sender<Result<Messages, ServerFnError>>,
 ) {
-    while let Ok(message) = receiver.recv().await {
-        if sink.send(Ok(message.1)).await.is_err() {
-            break;
+    loop {
+        match receiver.recv().await {
+            Ok(message) => {
+                if sink.send(Ok(message.1)).await.is_err() {
+                    break;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => (),
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
         }
     }
 }
@@ -366,12 +410,22 @@ async fn handle_broadcasts(
     mut receiver: tokio::sync::broadcast::Receiver<(Option<String>, Messages)>,
     mut sink: Sender<Result<Messages, ServerFnError>>,
 ) {
-    while let Ok(message) = receiver.recv().await {
-        if message.0.is_some_and(|v| id == v) {
-            continue;
-        }
-        if sink.send(Ok(message.1)).await.is_err() {
-            break;
+    loop {
+        match receiver.recv().await {
+            Ok(message) => {
+                if message.0.is_some_and(|v| id == v) {
+                    tracing::debug!(connection_id = %id, "skipping broadcast from self");
+                    continue;
+                }
+                tracing::trace!(connection_id = %id, "broadcasting message to client");
+                if sink.send(Ok(message.1)).await.is_err() {
+                    break;
+                }
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                tracing::warn!(connection_id = %id, lagged = n, "broadcast receiver lagged");
+            }
+            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
         }
     }
 }
