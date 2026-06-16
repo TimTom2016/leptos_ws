@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.8] - 2026-06-16
+### Added
+- Server-side tracing events for WebSocket connections, messages, and broadcasts (feature-gated behind `ssr`).
+- Client-side `delete()` now sends an unsubscribe message to the server, which stops broadcasting to that client without affecting other clients.
+
+### Fixed
+- Server no longer panics when `WsSignals` context is missing — returns a proper error instead.
+- `get_signal`/`get_channel` no longer panic on type mismatch — returns `None` instead.
+- `MutexGuard` no longer held across `.await` in the reconnection loop (potential deadlock fix).
+- `RwLockReadGuard` no longer held across `.await` in `ClientBidirectionalSignal::update_if_changed`.
+- `tx.send()` failures are now handled gracefully instead of panicking.
+- Server `Delete` handler now aborts the per-client broadcast task instead of deleting the signal globally.
+- `on_server`/`on_client` no-op methods simplified to return `()` instead of `Result<(), Error>`.
+- Unused `Result` from `delete_channel` now explicitly discarded.
+
 ## [0.9.7] - 2026-02-02
 ### Fixed
 - `on_reconnect` now only fires after a successful message is received, not on every reconnect attempt.
