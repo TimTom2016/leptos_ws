@@ -14,6 +14,8 @@ use leptos::{
     task::spawn_local,
 };
 use messages::{BiDirectionalMessage, ChannelMessage, Messages};
+#[cfg(feature = "ssr")]
+use dashmap::DashMap;
 #[cfg(any(feature = "csr", feature = "hydrate", feature = "ssr"))]
 pub use read_only::ReadOnlySignal;
 
@@ -281,6 +283,7 @@ pub async fn leptos_ws_websocket(
         return Err(ServerFnError::new("WsSignals not found in context"));
     };
     let id = Arc::new(nanoid::nanoid!());
+    let tasks: Arc<DashMap<(String, String), tokio::task::AbortHandle>> = Arc::new(DashMap::new());
     tracing::info!(connection_id = %id, "new WebSocket connection established");
     // spawn a task to listen to the input stream of messages coming in over the websocket
     tokio::spawn(async move {
@@ -312,7 +315,14 @@ pub async fn leptos_ws_websocket(
                             leptos::logging::error!("Failed to send EstablishResponse to client");
                             break;
                         }
-                        tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                        let handle = tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                        tasks.insert((id.to_string(), name.clone()), handle.abort_handle());
+                    }
+                    ServerSignalMessage::Delete(name) => {
+                        tracing::debug!(connection_id = %id, signal_name = %name, "client unsubscribing from server signal");
+                        if let Some(entry) = tasks.remove(&(id.to_string(), name)) {
+                            entry.1.abort();
+                        }
                     }
                     _ => leptos::logging::error!("Unexpected server signal message from client"),
                 },
@@ -339,13 +349,20 @@ pub async fn leptos_ws_websocket(
                             leptos::logging::error!("Failed to send EstablishResponse to client");
                             break;
                         }
-                        tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                        let handle = tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                        tasks.insert((id.to_string(), name.clone()), handle.abort_handle());
                     }
                     BiDirectionalMessage::Update(update) => {
                         tracing::debug!(connection_id = %id, signal_name = %update.get_name().clone(), "client sent bidirectional update");
                         server_signals
                             .update(&update.get_name().clone(), update, Some(id.to_string()))
                             .await;
+                    }
+                    BiDirectionalMessage::Delete(name) => {
+                        tracing::debug!(connection_id = %id, signal_name = %name, "client unsubscribing from bidirectional signal");
+                        if let Some(entry) = tasks.remove(&(id.to_string(), name)) {
+                            entry.1.abort();
+                        }
                     }
                     _ => leptos::logging::error!("Unexpected bi-directional message from client"),
                 },
@@ -365,12 +382,19 @@ pub async fn leptos_ws_websocket(
                             leptos::logging::error!("Failed to send EstablishResponse to client");
                             break;
                         }
-                        tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                        let handle = tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                        tasks.insert((id.to_string(), name.clone()), handle.abort_handle());
                     }
 
                     ChannelMessage::Message(name, value) => {
                         tracing::debug!(connection_id = %id, channel_name = %name, "client sent channel message");
                         server_signals.handle_message(&name, value);
+                    }
+                    ChannelMessage::Delete(name) => {
+                        tracing::debug!(connection_id = %id, channel_name = %name, "client unsubscribing from channel");
+                        if let Some(entry) = tasks.remove(&(id.to_string(), name)) {
+                            entry.1.abort();
+                        }
                     }
                     _ => leptos::logging::error!("Unexpected channel message from client"),
                 },

@@ -120,6 +120,12 @@ where
     T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static,
 {
     fn delete(&self) -> Result<(), Error> {
-        Err(Error::NotAvailableOnClient)
+        #[cfg(any(feature = "csr", feature = "hydrate"))]
+        if let Some(ws) = use_context::<crate::ServerSignalWebSocket>() {
+            ws.send(&Messages::Channel(ChannelMessage::Delete(
+                self.name.clone(),
+            )))?;
+        }
+        Ok(())
     }
 }
