@@ -53,6 +53,21 @@ mod server;
 /// When using `ChannelSignal`, ensure that you've set up the WebSocket connection
 /// using the `provide_websocket` function in your application's root component.
 #[cfg(feature = "ssr")]
-pub type ChannelSignal<T> = server::ServerChannelSignal<T>;
+pub type ChannelSignal<T, S = ()> = server::ServerChannelSignal<T, S>;
 #[cfg(all(any(feature = "csr", feature = "hydrate"), not(feature = "ssr")))]
-pub type ChannelSignal<T> = client::ClientChannelSignal<T>;
+pub type ChannelSignal<T, S = ()> = client::ClientChannelSignal<T, S>;
+
+pub struct ChannelContext<'a, S = ()> {
+    client_id: String,
+    pub state: &'a mut S,
+}
+
+impl<'a, S> ChannelContext<'a, S> {
+    pub fn new(client_id: String, state: &'a mut S) -> Self {
+        Self { client_id, state }
+    }
+
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+}

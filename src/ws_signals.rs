@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::sync::Arc;
 
 use crate::error::Error;
@@ -114,14 +115,18 @@ impl WsSignals {
             .and_then(|v| v.value().subscribe().ok())
     }
 
+    pub fn create_channel_state(&self, name: &str) -> Option<Box<dyn Any + Send + Sync>> {
+        self.channels.get(name).map(|v| v.create_state())
+    }
+
     pub fn add_observer_channel(&self, name: &str) -> Option<Receiver<(Option<String>, Messages)>> {
         self.channels
             .get(name)
             .and_then(|v| v.value().subscribe().ok())
     }
 
-    pub fn handle_message(&self, name: &str, message: Value) -> Option<Result<(), Error>> {
-        self.channels.get(name).map(|v| v.handle_message(message))
+    pub fn handle_message(&self, name: &str, client_id: &str, state: &mut dyn Any, message: Value) -> Option<Result<(), Error>> {
+        self.channels.get(name).map(|v| v.handle_message(client_id, state, message))
     }
 
     pub fn json(&self, name: &str) -> Option<Result<Value, Error>> {

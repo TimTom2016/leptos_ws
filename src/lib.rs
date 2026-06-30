@@ -6,19 +6,21 @@
 use crate::messages::ServerSignalMessage;
 #[cfg(any(feature = "csr", feature = "hydrate", feature = "ssr"))]
 pub use bidirectional::BiDirectionalSignal;
+pub use channel::ChannelContext;
 #[cfg(any(feature = "csr", feature = "hydrate", feature = "ssr"))]
 pub use channel::ChannelSignal;
+#[cfg(feature = "ssr")]
+use dashmap::DashMap;
 use leptos::{
     prelude::*,
     server_fn::{BoxedStream, Websocket, codec::JsonEncoding},
     task::spawn_local,
 };
 use messages::{BiDirectionalMessage, ChannelMessage, Messages};
-#[cfg(feature = "ssr")]
-use dashmap::DashMap;
 #[cfg(any(feature = "csr", feature = "hydrate", feature = "ssr"))]
 pub use read_only::ReadOnlySignal;
 
+use std::any::Any;
 use std::sync::{Arc, Mutex};
 pub use ws_signals::WsSignals;
 mod bidirectional;
@@ -143,7 +145,8 @@ impl Default for ServerSignalWebSocket {
 
                             // Fire appropriate connection callback
                             if is_first_connect
-                                && let Some(ref on_connect) = *on_connect.lock().expect("poisoned lock")
+                                && let Some(ref on_connect) =
+                                    *on_connect.lock().expect("poisoned lock")
                             {
                                 on_connect();
                             }
@@ -156,7 +159,9 @@ impl Default for ServerSignalWebSocket {
 
                                 // Fire on_reconnect after first successful message (confirms connection is working)
                                 if !first_message_received && !is_first_connect {
-                                    if let Some(ref on_reconnect) = *on_reconnect.lock().expect("poisoned lock") {
+                                    if let Some(ref on_reconnect) =
+                                        *on_reconnect.lock().expect("poisoned lock")
+                                    {
                                         on_reconnect();
                                     }
                                     first_message_received = true;
@@ -226,7 +231,7 @@ impl Default for ServerSignalWebSocket {
                                             spawn_local(handle_broadcasts_client(recv, tx.clone()));
                                         }
                                         ChannelMessage::Message(name, value) => {
-                                            state_signals.handle_message(&name, value);
+                                            state_signals.handle_message(&name, "", &mut (), value);
                                         }
                                         ChannelMessage::Delete(name) => {
                                             let _ = state_signals.delete_channel(&name);
@@ -285,6 +290,8 @@ pub async fn leptos_ws_websocket(
     let id = Arc::new(nanoid::nanoid!());
     let tasks: Arc<DashMap<(String, String), tokio::task::AbortHandle>> = Arc::new(DashMap::new());
     tracing::info!(connection_id = %id, "new WebSocket connection established");
+    // Per-channel state for this connection
+    let connection_state: Arc<DashMap<String, Box<dyn Any + Send + Sync>>> = Arc::new(DashMap::new());
     // spawn a task to listen to the input stream of messages coming in over the websocket
     tokio::spawn(async move {
         while let Some(msg) = input.next().await {
@@ -303,19 +310,18 @@ pub async fn leptos_ws_websocket(
                             leptos::logging::error!("Failed to get JSON for signal '{}'", name);
                             continue;
                         };
-                        if tx.send(Ok(Messages::ServerSignal(
-                            ServerSignalMessage::EstablishResponse((
-                                name.clone(),
-                                value,
-                            )),
-                        )))
-                        .await
-                        .is_err()
+                        if tx
+                            .send(Ok(Messages::ServerSignal(
+                                ServerSignalMessage::EstablishResponse((name.clone(), value)),
+                            )))
+                            .await
+                            .is_err()
                         {
                             leptos::logging::error!("Failed to send EstablishResponse to client");
                             break;
                         }
-                        let handle = tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                        let handle =
+                            tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
                         tasks.insert((id.to_string(), name.clone()), handle.abort_handle());
                     }
                     ServerSignalMessage::Delete(name) => {
@@ -334,22 +340,24 @@ pub async fn leptos_ws_websocket(
                             continue;
                         };
                         let Some(Ok(value)) = server_signals.json(&name) else {
-                            leptos::logging::error!("Failed to get JSON for bidirectional signal '{}'", name);
+                            leptos::logging::error!(
+                                "Failed to get JSON for bidirectional signal '{}'",
+                                name
+                            );
                             continue;
                         };
-                        if tx.send(Ok(Messages::BiDirectional(
-                            BiDirectionalMessage::EstablishResponse((
-                                name.clone(),
-                                value,
-                            )),
-                        )))
-                        .await
-                        .is_err()
+                        if tx
+                            .send(Ok(Messages::BiDirectional(
+                                BiDirectionalMessage::EstablishResponse((name.clone(), value)),
+                            )))
+                            .await
+                            .is_err()
                         {
                             leptos::logging::error!("Failed to send EstablishResponse to client");
                             break;
                         }
-                        let handle = tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                        let handle =
+                            tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
                         tasks.insert((id.to_string(), name.clone()), handle.abort_handle());
                     }
                     BiDirectionalMessage::Update(update) => {
@@ -373,25 +381,34 @@ pub async fn leptos_ws_websocket(
                             leptos::logging::error!("Channel '{}' not found", name);
                             continue;
                         };
-                        if tx.send(Ok(Messages::Channel(ChannelMessage::EstablishResponse(
-                            name.clone(),
-                        ))))
-                        .await
-                        .is_err()
+                        // Create per-connection state for this channel
+                        if let Some(state) = server_signals.create_channel_state(&name) {
+                            connection_state.insert(name.clone(), state);
+                        }
+                        if tx
+                            .send(Ok(Messages::Channel(ChannelMessage::EstablishResponse(
+                                name.clone(),
+                            ))))
+                            .await
+                            .is_err()
                         {
                             leptos::logging::error!("Failed to send EstablishResponse to client");
                             break;
                         }
-                        let handle = tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
+                        let handle =
+                            tokio::spawn(handle_broadcasts(id.to_string(), recv, tx.clone()));
                         tasks.insert((id.to_string(), name.clone()), handle.abort_handle());
                     }
 
                     ChannelMessage::Message(name, value) => {
                         tracing::debug!(connection_id = %id, channel_name = %name, "client sent channel message");
-                        server_signals.handle_message(&name, value);
+                        if let Some(mut state) = connection_state.get_mut(&name) {
+                            server_signals.handle_message(&name, &id, &mut *state, value);
+                        }
                     }
                     ChannelMessage::Delete(name) => {
                         tracing::debug!(connection_id = %id, channel_name = %name, "client unsubscribing from channel");
+                        connection_state.remove(&name);
                         if let Some(entry) = tasks.remove(&(id.to_string(), name)) {
                             entry.1.abort();
                         }

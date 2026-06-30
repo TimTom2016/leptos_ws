@@ -1,4 +1,4 @@
-use crate::{error::Error, messages::Messages};
+use crate::{channel::ChannelContext, error::Error, messages::Messages};
 use async_trait::async_trait;
 use json_patch::Patch;
 use serde_json::Value;
@@ -27,10 +27,29 @@ pub trait ChannelSignalTrait: private::DeleteTrait + Send + Sync + 'static {
     fn subscribe(
         &self,
     ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, Messages)>, Error>;
-    /// Call callback function with message
-    fn handle_message(&self, message: Value) -> Result<(), Error>;
+    /// Call callback function with message and optional per-connection state
+    fn handle_message(&self, client_id: &str, state: &mut dyn Any, message: Value) -> Result<(), Error>;
+
+    /// Create a new per-connection state for this channel
+    fn create_state(&self) -> Box<dyn Any + Send + Sync>;
 
     fn on_reconnect_message(&self) -> Result<Messages, Error>;
+}
+
+/// Trait for handling channel messages with mutable client context.
+/// Implement this on a struct to get `&self` + `&mut ChannelContext<'_, S>` alongside `&T`,
+/// or just pass a closure `Fn(&T)` for the simple case (context is ignored).
+pub trait ChannelHandler<T, S = ()>: Send + Sync + 'static {
+    fn handle(&self, context: &mut ChannelContext<'_, S>, msg: &T);
+}
+
+impl<T, F> ChannelHandler<T> for F
+where
+    F: Fn(&T) + Send + Sync + 'static,
+{
+    fn handle(&self, _context: &mut ChannelContext<'_, ()>, msg: &T) {
+        self(msg);
+    }
 }
 
 pub(crate) mod private {
