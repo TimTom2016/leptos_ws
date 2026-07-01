@@ -8,21 +8,34 @@ use crate::traits::ChannelSignalTrait;
 use crate::traits::WsSignalCore;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
+use futures::channel::mpsc::Sender;
 use leptos::prelude::*;
+use leptos::server_fn::ServerFnError;
 use serde_json::Value;
 use tokio::sync::broadcast::Receiver;
+
+pub(crate) struct ConnEntry {
+    pub(crate) state: Box<dyn Any + Send + Sync>,
+    pub(crate) sender: Sender<Result<Messages, ServerFnError>>,
+}
 
 #[derive(Clone)]
 pub struct WsSignals {
     signals: Arc<DashMap<String, Arc<dyn WsSignalCore + Send + Sync + 'static>>>,
     channels: Arc<DashMap<String, Arc<dyn ChannelSignalTrait + Send + Sync + 'static>>>,
+    pub(crate) channel_connections: Arc<DashMap<String, ConnEntry>>,
 }
 
 impl WsSignals {
     pub fn new() -> Self {
         let signals = Arc::new(DashMap::new());
         let channels = Arc::new(DashMap::new());
-        Self { signals, channels }
+        let channel_connections = Arc::new(DashMap::new());
+        Self {
+            signals,
+            channels,
+            channel_connections,
+        }
     }
 
     pub fn create_signal<T>(&mut self, name: &str, value: T, msg: &Messages) -> Result<(), Error>
@@ -125,8 +138,16 @@ impl WsSignals {
             .and_then(|v| v.value().subscribe().ok())
     }
 
-    pub fn handle_message(&self, name: &str, client_id: &str, state: &mut dyn Any, message: Value) -> Option<Result<(), Error>> {
-        self.channels.get(name).map(|v| v.handle_message(client_id, state, message))
+    pub fn handle_message(
+        &self,
+        name: &str,
+        client_id: &str,
+        state: &mut dyn Any,
+        message: Value,
+    ) -> Option<Result<(), Error>> {
+        self.channels
+            .get(name)
+            .map(|v| v.handle_message(client_id, state, message))
     }
 
     pub fn json(&self, name: &str) -> Option<Result<Value, Error>> {

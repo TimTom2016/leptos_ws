@@ -28,7 +28,12 @@ pub trait ChannelSignalTrait: private::DeleteTrait + Send + Sync + 'static {
         &self,
     ) -> Result<tokio::sync::broadcast::Receiver<(Option<String>, Messages)>, Error>;
     /// Call callback function with message and optional per-connection state
-    fn handle_message(&self, client_id: &str, state: &mut dyn Any, message: Value) -> Result<(), Error>;
+    fn handle_message(
+        &self,
+        client_id: &str,
+        state: &mut dyn Any,
+        message: Value,
+    ) -> Result<(), Error>;
 
     /// Create a new per-connection state for this channel
     fn create_state(&self) -> Box<dyn Any + Send + Sync>;
@@ -43,12 +48,25 @@ pub trait ChannelHandler<T, S = ()>: Send + Sync + 'static {
     fn handle(&self, context: &mut ChannelContext<'_, S>, msg: &T);
 }
 
-impl<T, F> ChannelHandler<T> for F
+impl<T, S, F> ChannelHandler<T, S> for F
 where
     F: Fn(&T) + Send + Sync + 'static,
 {
-    fn handle(&self, _context: &mut ChannelContext<'_, ()>, msg: &T) {
+    fn handle(&self, _context: &mut ChannelContext<'_, S>, msg: &T) {
         self(msg);
+    }
+}
+
+pub trait SendMapperHandler<T, S = ()>: Send + Sync + 'static {
+    fn handle(&self, context: &ChannelContext<'_, S>, msg: &T) -> Option<T>;
+}
+
+impl<T, S, F> SendMapperHandler<T, S> for F
+where
+    F: Fn(&T) -> Option<T> + Send + Sync + 'static,
+{
+    fn handle(&self, _context: &ChannelContext<'_, S>, msg: &T) -> Option<T> {
+        self(msg)
     }
 }
 

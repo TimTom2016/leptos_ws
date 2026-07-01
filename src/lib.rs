@@ -20,7 +20,6 @@ use messages::{BiDirectionalMessage, ChannelMessage, Messages};
 #[cfg(any(feature = "csr", feature = "hydrate", feature = "ssr"))]
 pub use read_only::ReadOnlySignal;
 
-use std::any::Any;
 use std::sync::{Arc, Mutex};
 pub use ws_signals::WsSignals;
 mod bidirectional;
@@ -290,8 +289,6 @@ pub async fn leptos_ws_websocket(
     let id = Arc::new(nanoid::nanoid!());
     let tasks: Arc<DashMap<(String, String), tokio::task::AbortHandle>> = Arc::new(DashMap::new());
     tracing::info!(connection_id = %id, "new WebSocket connection established");
-    // Per-channel state for this connection
-    let connection_state: Arc<DashMap<String, Box<dyn Any + Send + Sync>>> = Arc::new(DashMap::new());
     // spawn a task to listen to the input stream of messages coming in over the websocket
     tokio::spawn(async move {
         while let Some(msg) = input.next().await {
@@ -381,9 +378,16 @@ pub async fn leptos_ws_websocket(
                             leptos::logging::error!("Channel '{}' not found", name);
                             continue;
                         };
-                        // Create per-connection state for this channel
+                        // Create per-connection state
                         if let Some(state) = server_signals.create_channel_state(&name) {
-                            connection_state.insert(name.clone(), state);
+                            let key = format!("{}:{}", name, id);
+                            server_signals.channel_connections.insert(
+                                key,
+                                crate::ws_signals::ConnEntry {
+                                    state,
+                                    sender: tx.clone(),
+                                },
+                            );
                         }
                         if tx
                             .send(Ok(Messages::Channel(ChannelMessage::EstablishResponse(
@@ -402,13 +406,21 @@ pub async fn leptos_ws_websocket(
 
                     ChannelMessage::Message(name, value) => {
                         tracing::debug!(connection_id = %id, channel_name = %name, "client sent channel message");
-                        if let Some(mut state) = connection_state.get_mut(&name) {
-                            server_signals.handle_message(&name, &id, &mut *state, value);
+                        let key = format!("{}:{}", name, id);
+                        // Remove the entry to avoid holding a DashMap write lock while
+                        // handle_message runs, since the handler may call send_message
+                        // which read-locks all shards (deadlock with write lock held).
+                        if let Some((_, mut entry)) =
+                            server_signals.channel_connections.remove(&key)
+                        {
+                            server_signals.handle_message(&name, &id, &mut *entry.state, value);
+                            server_signals.channel_connections.insert(key, entry);
                         }
                     }
                     ChannelMessage::Delete(name) => {
                         tracing::debug!(connection_id = %id, channel_name = %name, "client unsubscribing from channel");
-                        connection_state.remove(&name);
+                        let key = format!("{}:{}", name, id);
+                        server_signals.channel_connections.remove(&key);
                         if let Some(entry) = tasks.remove(&(id.to_string(), name)) {
                             entry.1.abort();
                         }

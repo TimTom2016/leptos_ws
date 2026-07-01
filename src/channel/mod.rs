@@ -59,7 +59,7 @@ pub type ChannelSignal<T, S = ()> = client::ClientChannelSignal<T, S>;
 
 pub struct ChannelContext<'a, S = ()> {
     client_id: String,
-    pub state: &'a mut S,
+    state: &'a mut S,
 }
 
 impl<'a, S> ChannelContext<'a, S> {
@@ -69,5 +69,13 @@ impl<'a, S> ChannelContext<'a, S> {
 
     pub fn client_id(&self) -> &str {
         &self.client_id
+    }
+
+    pub fn state(&self) -> &S {
+        self.state
+    }
+
+    pub fn state_mut(&mut self) -> &mut S {
+        self.state
     }
 }

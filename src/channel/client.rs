@@ -1,6 +1,6 @@
 use super::ChannelContext;
 use crate::messages::{ChannelMessage, Messages};
-use crate::traits::{ChannelHandler, ChannelSignalTrait, private};
+use crate::traits::{ChannelHandler, ChannelSignalTrait, SendMapperHandler, private};
 use crate::{error::Error, ws_signals::WsSignals};
 use async_trait::async_trait;
 use leptos::prelude::*;
@@ -48,7 +48,12 @@ impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static, S: Send + Syn
         Ok(self.observers.subscribe())
     }
 
-    fn handle_message(&self, client_id: &str, _state: &mut dyn Any, message: Value) -> Result<(), Error> {
+    fn handle_message(
+        &self,
+        client_id: &str,
+        _state: &mut dyn Any,
+        message: Value,
+    ) -> Result<(), Error> {
         if let Ok(lock) = self.client_callback.read()
             && let Some(callback) = lock.as_ref()
             && let Ok(message) = serde_json::from_value(message)
@@ -115,13 +120,15 @@ where
     }
 
     /// Register a callback that gets called when a message arrives on the server side
-    pub fn on_server(&self, _callback: impl ChannelHandler<T, S>)
-    {
+    pub fn on_server(&self, _callback: impl ChannelHandler<T, S>) {}
+
+    /// Add a send mapper (no-op on client)
+    pub fn add_send_mapper<F>(&self, _mapper: impl SendMapperHandler<T, S>) -> Result<(), Error> {
+        Ok(())
     }
 
     /// Register a callback that gets called when a message arrives on the client side
-    pub fn on_client(&self, callback: impl ChannelHandler<T, S>) -> Result<(), Error>
-    {
+    pub fn on_client(&self, callback: impl ChannelHandler<T, S>) -> Result<(), Error> {
         let Ok(mut client_callback) = self.client_callback.write() else {
             return Err(Error::AddingChannelHandlerFailed);
         };
