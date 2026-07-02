@@ -122,8 +122,12 @@ where
 
     async fn update_if_changed(&self) -> Result<(), Error> {
         let patch = {
-            let json = self.json_value.read().map_err(|_| Error::UpdateSignalFailed)?;
-            let new_json = serde_json::to_value(self.value.get())?;
+            let json = self
+                .json_value
+                .read()
+                .map_err(|_| Error::UpdateSignalFailed)?;
+            let value = self.value.try_get().ok_or(Error::UpdateSignalFailed)?;
+            let new_json = serde_json::to_value(value)?;
             if *json == new_json {
                 return Err(Error::UpdateSignalFailed);
             }
