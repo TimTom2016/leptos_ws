@@ -22,7 +22,7 @@ where
     observers: Arc<BcSender<(Option<String>, Messages)>>,
     server_callback: Arc<RwLock<Option<Arc<dyn ChannelHandler<T, S>>>>>,
     send_mapper: Arc<RwLock<Option<Arc<dyn SendMapperHandler<T, S>>>>>,
-    connections: Arc<DashMap<String, ConnEntry>>,
+    connections: Arc<DashMap<String, Arc<DashMap<String, ConnEntry>>>>,
     state_factory: Arc<RwLock<Option<Arc<dyn Fn() -> S + Send + Sync>>>>,
 }
 
@@ -108,6 +108,10 @@ where
         Self::new_with_context(&mut signals, name)
     }
 
+    /// Create or retrieve a channel signal, using an explicit `WsSignals` instance.
+    ///
+    /// Useful when running outside a Leptos server function context (e.g. in an Actix
+    /// or Axum handler where you hold a reference to `WsSignals` from app state).
     pub fn new_with_context(signals: &mut WsSignals, name: &str) -> Result<Self, Error>
     where
         S: Default,
@@ -115,7 +119,7 @@ where
         if let Some(signal) = signals.get_channel::<Self>(name) {
             return Ok(signal);
         }
-        let (send, _) = channel(32);
+        let (send, _) = channel(256);
         let new_signal = Self {
             name: name.to_owned(),
             observers: Arc::new(send),
@@ -139,7 +143,7 @@ where
         }
     }
 
-    /// Register a callback that gets called when a message arrives on the server side
+    /// Register a handler called when a message arrives from a client.
     pub fn on_server(&self, callback: impl ChannelHandler<T, S>) -> Result<(), Error> {
         let Ok(mut server_callback) = self.server_callback.write() else {
             return Err(Error::AddingChannelHandlerFailed);
@@ -148,12 +152,14 @@ where
         Ok(())
     }
 
-    /// Register a callback that gets called when a message arrives on the client side
+    /// Register a handler called when a message arrives from the server (no-op on server side).
     pub fn on_client(&self, _callback: impl ChannelHandler<T, S>) {}
 
-    /// Add a mapper that transforms/filters outgoing messages per-connection.
-    /// The mapper receives the per-connection state and the message.
-    /// Return `None` to suppress the message for that connection.
+    /// Register a per-connection send mapper.
+    ///
+    /// The mapper is called for each connected client before a message is sent. Return
+    /// `Some(mapped_msg)` to deliver the (optionally transformed) message, or `None`
+    /// to suppress it for that client.
     pub fn add_send_mapper(&self, mapper: impl SendMapperHandler<T, S>) -> Result<(), Error> {
         let Ok(mut lock) = self.send_mapper.write() else {
             return Err(Error::AddingChannelHandlerFailed);
@@ -162,9 +168,10 @@ where
         Ok(())
     }
 
-    /// Provide a custom factory for creating per-connection state.
-    /// When set, this overrides `S::default()` for each new connection.
-    /// Must be called before clients establish connections to the channel.
+    /// Override the default per-connection state factory.
+    ///
+    /// By default, `S::default()` is used for each new connection. Use this to
+    /// provide custom initial state. Must be called before clients connect.
     pub fn with_state_factory<F>(&self, factory: F) -> Result<(), Error>
     where
         F: Fn() -> S + Send + Sync + 'static,
@@ -176,24 +183,24 @@ where
         Ok(())
     }
 
-    /// Send a message to all clients, applying the send mapper per-connection
+    /// Send a message to all connected clients.
+    ///
+    /// If a send mapper is registered, it is applied per-connection — the message
+    /// is only delivered to clients where the mapper returns `Some(...)`. Without a
+    /// mapper, the message is broadcast to all subscribed clients.
     pub fn send_message(&self, message: T) -> Result<(), Error> {
-        let prefix = format!("{}:", self.name);
-        let keys: Vec<String> = self
-            .connections
-            .iter()
-            .filter(|e| e.key().starts_with(&prefix))
-            .map(|e| e.key().clone())
-            .collect();
-
         if let Ok(lock) = self.send_mapper.read()
             && let Some(mapper) = lock.as_ref()
         {
+            let map = self.connections.get(&self.name).map(|r| r.value().clone());
+            let Some(map) = map else {
+                return Ok(());
+            };
+            let keys: Vec<String> = map.iter().map(|e| e.key().clone()).collect();
+
             for key in keys {
-                if let Some(mut entry) = self.connections.get_mut(&key) {
-                    let Some(conn_id) = key.strip_prefix(&prefix) else {
-                        continue;
-                    };
+                if let Some(mut entry) = map.get_mut(&key) {
+                    let conn_id = key.as_str();
                     let s: &mut S = entry
                         .state
                         .downcast_mut()
@@ -203,7 +210,13 @@ where
                         let value = serde_json::to_value(&mapped)?;
                         let msg =
                             Messages::Channel(ChannelMessage::Message(self.name.clone(), value));
-                        let _ = entry.sender.try_send(Ok(msg));
+                        if entry.sender.try_send(Ok(msg)).is_err() {
+                            tracing::warn!(
+                                connection_id = %conn_id,
+                                channel = %self.name,
+                                "dropping message: per-connection channel full"
+                            );
+                        }
                     }
                 }
             }
@@ -220,6 +233,7 @@ where
         }
     }
 
+    /// Remove this channel and disconnect all subscribers.
     pub fn delete(&self) -> Result<(), Error> {
         let mut signals = use_context::<WsSignals>().ok_or(Error::MissingServerSignals)?;
         signals.delete_channel(&self.name)

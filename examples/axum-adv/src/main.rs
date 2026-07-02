@@ -14,7 +14,7 @@ use axum::{
 };
 #[cfg(feature = "ssr")]
 pub use axum_adv_example::app;
-use axum_adv_example::app::{App, Blocked};
+use axum_adv_example::app::App;
 #[cfg(feature = "ssr")]
 use config::get_configuration;
 #[cfg(feature = "ssr")]
@@ -38,7 +38,6 @@ pub struct AppState {
     server_signals: WsSignals,
     routes: Option<Vec<AxumRouteListing>>,
     options: LeptosOptions,
-    blocked: app::Blocked,
 }
 
 #[cfg(feature = "ssr")]
@@ -72,7 +71,6 @@ async fn main() {
             move || {
                 provide_context(state1.options.clone());
                 provide_context(state1.server_signals.clone());
-                provide_context(state1.blocked.clone());
             },
             move || shell(options2.clone()),
         );
@@ -89,14 +87,12 @@ async fn main() {
             move || {
                 provide_context(state.options.clone());
                 provide_context(state.server_signals.clone());
-                provide_context(state.blocked.clone());
             },
             request,
         )
         .await
     }
 
-    let blocked_users = Blocked::new();
     simple_logger::init_with_level(log::Level::Debug).expect("couldn't initialize logging");
     let server_signals = WsSignals::new();
     let conf = get_configuration(None).unwrap();
@@ -105,7 +101,6 @@ async fn main() {
         options: leptos_options.clone(),
         routes: None,
         server_signals: server_signals.clone(),
-        blocked: blocked_users.clone(),
     };
     let addr = leptos_options.site_addr;
     let state2 = state.clone();
@@ -115,7 +110,6 @@ async fn main() {
         None,
         move || {
             provide_context(state2.server_signals.clone());
-            provide_context(state2.blocked.clone())
         },
     );
     state.routes = Some(routes.clone());
@@ -131,7 +125,6 @@ async fn main() {
         >(
             move || {
                 provide_context(state2.server_signals.clone());
-                provide_context(state2.blocked.clone())
             },
             shell,
         ))
