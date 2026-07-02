@@ -44,6 +44,8 @@ impl WsSignals {
     {
         #[cfg(any(feature = "csr", feature = "hydrate"))]
         {
+            use leptos::prelude::use_context;
+
             use crate::ServerSignalWebSocket;
 
             let ws = use_context::<ServerSignalWebSocket>().ok_or(Error::MissingServerSignals)?;
@@ -83,6 +85,8 @@ impl WsSignals {
     {
         #[cfg(any(feature = "csr", feature = "hydrate"))]
         {
+            use leptos::prelude::use_context;
+
             use crate::ServerSignalWebSocket;
 
             let ws = use_context::<ServerSignalWebSocket>().ok_or(Error::MissingServerSignals)?;

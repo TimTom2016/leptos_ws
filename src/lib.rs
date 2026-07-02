@@ -15,9 +15,12 @@ use dashmap::DashMap;
 use futures::channel::mpsc::{self, Sender};
 #[allow(unused_imports)]
 use futures::{SinkExt, StreamExt};
-use leptos::prelude::*;
 #[allow(unused_imports)]
-use leptos::server_fn::{BoxedStream, Websocket, codec::JsonEncoding};
+use leptos::{
+    prelude::*,
+    server_fn::{BoxedStream, Websocket, codec::JsonEncoding},
+    task::spawn_local,
+};
 #[allow(unused_imports)]
 use messages::{BiDirectionalMessage, ChannelMessage, Messages};
 #[cfg(any(feature = "csr", feature = "hydrate", feature = "ssr"))]
@@ -241,7 +244,13 @@ impl Default for ServerSignalWebSocket {
         }
 
         provide_context(state_signals);
-
+        let ws_client = Self {
+            send,
+            delayed_msgs,
+            on_disconnect,
+            on_reconnect,
+            on_connect,
+        };
         ws_client
     }
 }

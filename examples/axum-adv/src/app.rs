@@ -58,31 +58,27 @@ pub fn App() -> impl IntoView {
         channel.on_server(SubscribeHandler).ok();
 
         channel
-            .add_send_mapper_ref(
-                move |ctx: &ChannelContext<'_, ConnectionState>, msg: &Messages| {
-                    match msg {
-                        Messages::Event { topic, content: _ } => {
-                            if ctx.state().interests.iter().any(|i| i == topic) {
-                                Some(msg.clone())
-                            } else {
-                                None
-                            }
+            .add_send_mapper(
+                move |ctx: &ChannelContext<'_, ConnectionState>, msg: &Messages| match msg {
+                    Messages::Event { topic, content: _ } => {
+                        if ctx.state().interests.iter().any(|i| i == topic) {
+                            Some(msg.clone())
+                        } else {
+                            None
                         }
-                        _ => None,
                     }
+                    _ => None,
                 },
             )
             .ok();
     }
 
     let messages_setter = set_messages.clone();
-    channel.on_client(move |msg: &Messages| {
-        match msg {
-            Messages::Event { topic, content } => {
-                messages_setter.update(|msgs| msgs.push(format!("[{}] {}", topic, content)));
-            }
-            _ => {}
+    channel.on_client(move |msg: &Messages| match msg {
+        Messages::Event { topic, content } => {
+            messages_setter.update(|msgs| msgs.push(format!("[{}] {}", topic, content)));
         }
+        _ => {}
     });
 
     view! {
