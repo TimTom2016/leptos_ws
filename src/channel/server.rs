@@ -1,30 +1,58 @@
 use std::any::Any;
 use std::sync::{Arc, RwLock};
 
+use super::ChannelContext;
 use crate::error::Error;
 use crate::messages::{ChannelMessage, Messages};
-use crate::traits::{ChannelSignalTrait, private};
-use crate::ws_signals::WsSignals;
+use crate::traits::{
+    ChannelHandler, ChannelSignalTrait, SendFilterHandler, SendMapperHandler, private,
+};
+use crate::ws_signals::{ConnEntry, WsSignals};
 use async_trait::async_trait;
+use dashmap::DashMap;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::broadcast::{Sender, channel};
+use tokio::sync::broadcast::{Sender as BcSender, channel};
+
+const BROADCAST_CAPACITY: usize = 256;
 
 /// A signal owned by the server which writes to the websocket when mutated.
-#[derive(Clone)]
-pub struct ServerChannelSignal<T>
+pub struct ServerChannelSignal<T, S = ()>
 where
     T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>,
 {
     name: String,
-    observers: Arc<Sender<(Option<String>, Messages)>>,
-    server_callback: Arc<RwLock<Option<Arc<dyn Fn(&T) + Send + Sync + 'static>>>>,
+    observers: Arc<BcSender<(Option<String>, Messages)>>,
+    server_callback: Arc<RwLock<Option<Arc<dyn ChannelHandler<T, S>>>>>,
+    send_mapper: Arc<RwLock<Option<Arc<dyn SendMapperHandler<T, S>>>>>,
+    send_filter: Arc<RwLock<Option<Arc<dyn SendFilterHandler<T, S>>>>>,
+    connections: Arc<DashMap<String, Arc<DashMap<String, ConnEntry>>>>,
+    state_factory: Arc<RwLock<Option<Arc<dyn Fn() -> S + Send + Sync>>>>,
+}
+
+impl<T, S> Clone for ServerChannelSignal<T, S>
+where
+    T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            observers: self.observers.clone(),
+            server_callback: self.server_callback.clone(),
+            send_mapper: self.send_mapper.clone(),
+            send_filter: self.send_filter.clone(),
+            connections: self.connections.clone(),
+            state_factory: self.state_factory.clone(),
+        }
+    }
 }
 
 #[async_trait]
-impl<T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static> ChannelSignalTrait
-    for ServerChannelSignal<T>
+impl<
+    T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static,
+    S: Send + Sync + Default + 'static,
+> ChannelSignalTrait for ServerChannelSignal<T, S>
 {
     fn as_any(&self) -> &dyn Any {
         self
@@ -36,15 +64,34 @@ impl<T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static> C
         Ok(self.observers.subscribe())
     }
 
-    fn handle_message(&self, message: Value) -> Result<(), Error> {
+    fn handle_message(
+        &self,
+        client_id: &str,
+        state: &mut dyn Any,
+        message: Value,
+    ) -> Result<(), Error> {
         if let Ok(lock) = self.server_callback.read()
             && let Some(callback) = lock.as_ref()
             && let Ok(message) = serde_json::from_value(message)
         {
-            callback(&message);
+            let state: &mut S = state
+                .downcast_mut()
+                .expect("Connection state type mismatch");
+            let mut ctx = ChannelContext::new(client_id, state);
+            callback.handle(&mut ctx, &message);
         }
 
         Ok(())
+    }
+
+    fn create_state(&self) -> Box<dyn Any + Send + Sync> {
+        if let Ok(lock) = self.state_factory.read()
+            && let Some(factory) = lock.as_ref()
+        {
+            Box::new(factory())
+        } else {
+            Box::new(S::default())
+        }
     }
 
     fn on_reconnect_message(&self) -> Result<Messages, Error> {
@@ -52,26 +99,47 @@ impl<T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static> C
             self.name.clone(),
         )))
     }
+
+    fn has_server_handler(&self) -> bool {
+        self.server_callback
+            .read()
+            .is_ok_and(|lock| lock.is_some())
+    }
 }
 
-impl<T> ServerChannelSignal<T>
+impl<T, S> ServerChannelSignal<T, S>
 where
     T: Clone + Serialize + Send + Sync + for<'de> Deserialize<'de> + 'static,
+    S: Send + Sync + 'static,
 {
-    pub fn new(name: &str) -> Result<Self, Error> {
+    pub fn new(name: &str) -> Result<Self, Error>
+    where
+        S: Default,
+    {
         let mut signals = use_context::<WsSignals>().ok_or(Error::MissingServerSignals)?;
         Self::new_with_context(&mut signals, name)
     }
 
-    pub fn new_with_context(signals: &mut WsSignals, name: &str) -> Result<Self, Error> {
-        if let Some(signal) = signals.get_channel(name) {
+    /// Create or retrieve a channel signal, using an explicit `WsSignals` instance.
+    ///
+    /// Useful when running outside a Leptos server function context (e.g. in an Actix
+    /// or Axum handler where you hold a reference to `WsSignals` from app state).
+    pub fn new_with_context(signals: &mut WsSignals, name: &str) -> Result<Self, Error>
+    where
+        S: Default,
+    {
+        if let Some(signal) = signals.get_channel::<Self>(name) {
             return Ok(signal);
         }
-        let (send, _) = channel(32);
+        let (send, _) = channel(BROADCAST_CAPACITY);
         let new_signal = Self {
             name: name.to_owned(),
             observers: Arc::new(send),
             server_callback: Arc::new(RwLock::new(None)),
+            send_mapper: Arc::new(RwLock::new(None)),
+            send_filter: Arc::new(RwLock::new(None)),
+            connections: signals.channel_connections.clone(),
+            state_factory: Arc::new(RwLock::new(None)),
         };
         let signal = new_signal.clone();
 
@@ -88,11 +156,8 @@ where
         }
     }
 
-    /// Register a callback that gets called when a message arrives on the server side
-    pub fn on_server<F>(&self, callback: F) -> Result<(), Error>
-    where
-        F: Fn(&T) + Send + Sync + 'static,
-    {
+    /// Register a handler called when a message arrives from a client.
+    pub fn on_server(&self, callback: impl ChannelHandler<T, S>) -> Result<(), Error> {
         let Ok(mut server_callback) = self.server_callback.write() else {
             return Err(Error::AddingChannelHandlerFailed);
         };
@@ -100,15 +165,120 @@ where
         Ok(())
     }
 
-    /// Register a callback that gets called when a message arrives on the client side
-    pub fn on_client<F>(&self, _callback: F)
-    where
-        F: Fn(&T) + Send + Sync + 'static,
-    {
+    /// Register a handler called when a message arrives from the server (no-op on server side).
+    pub fn on_client(&self, _callback: impl ChannelHandler<T, S>) {}
+
+    /// Register a per-connection send mapper.
+    ///
+    /// The mapper is called for each connected client before a message is sent. Return
+    /// `Some(mapped_msg)` to deliver the (optionally transformed) message, or `None`
+    /// to suppress it for that client.
+    pub fn add_send_mapper(&self, mapper: impl SendMapperHandler<T, S>) -> Result<(), Error> {
+        let Ok(mut lock) = self.send_mapper.write() else {
+            return Err(Error::AddingChannelHandlerFailed);
+        };
+        *lock = Some(Arc::new(mapper));
+        Ok(())
     }
 
-    /// Send a message to the client
+    /// Register a per-connection send filter. Return `true` to deliver, `false` to suppress.
+    /// Applied before the mapper when both are registered.
+    pub fn add_send_filter(&self, filter: impl SendFilterHandler<T, S>) -> Result<(), Error> {
+        let Ok(mut lock) = self.send_filter.write() else {
+            return Err(Error::AddingChannelHandlerFailed);
+        };
+        *lock = Some(Arc::new(filter));
+        Ok(())
+    }
+
+    /// Override the default per-connection state factory.
+    ///
+    /// By default, `S::default()` is used for each new connection. Use this to
+    /// provide custom initial state. Must be called before clients connect.
+    pub fn with_state_factory<F>(&self, factory: F) -> Result<(), Error>
+    where
+        F: Fn() -> S + Send + Sync + 'static,
+    {
+        let Ok(mut lock) = self.state_factory.write() else {
+            return Err(Error::AddingChannelHandlerFailed);
+        };
+        *lock = Some(Arc::new(factory));
+        Ok(())
+    }
+
+    /// Send a message to all connected clients.
+    ///
+    /// If a send filter or mapper is registered it is applied per-connection; otherwise
+    /// the message is broadcast to all subscribed clients.
     pub fn send_message(&self, message: T) -> Result<(), Error> {
+        let connections = || {
+            let map = self.connections.get(&self.name).map(|r| r.value().clone())?;
+            let keys: Vec<String> = map.iter().map(|e| e.key().clone()).collect();
+            Some((map, keys))
+        };
+
+        if let Ok(lock) = self.send_filter.read()
+            && let Some(filter) = lock.as_ref()
+        {
+            let value = serde_json::to_value(&message)?;
+            if let Some((map, keys)) = connections() {
+                for key in keys {
+                    if let Some(mut entry) = map.get_mut(&key) {
+                        let conn_id = key.as_str();
+                        let s: &mut S = entry
+                            .state
+                            .downcast_mut()
+                            .expect("Connection state type mismatch");
+                        let ctx = ChannelContext::new(conn_id, s);
+                        if filter.allow(&ctx, &message) {
+                            let msg = Messages::Channel(ChannelMessage::Message(
+                                self.name.clone(),
+                                value.clone(),
+                            ));
+                            if entry.sender.try_send(Ok(msg)).is_err() {
+                                tracing::warn!(
+                                    connection_id = %conn_id,
+                                    channel = %self.name,
+                                    "dropping message: per-connection channel full"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            return Ok(());
+        }
+
+        if let Ok(lock) = self.send_mapper.read()
+            && let Some(mapper) = lock.as_ref()
+        {
+            if let Some((map, keys)) = connections() {
+                for key in keys {
+                    if let Some(mut entry) = map.get_mut(&key) {
+                        let conn_id = key.as_str();
+                        let s: &mut S = entry
+                            .state
+                            .downcast_mut()
+                            .expect("Connection state type mismatch");
+                        let ctx = ChannelContext::new(conn_id, s);
+                        if let Some(mapped) = mapper.handle(&ctx, &message) {
+                            let value = serde_json::to_value(&mapped)?;
+                            let msg =
+                                Messages::Channel(ChannelMessage::Message(self.name.clone(), value));
+                            if entry.sender.try_send(Ok(msg)).is_err() {
+                                tracing::warn!(
+                                    connection_id = %conn_id,
+                                    channel = %self.name,
+                                    "dropping message: per-connection channel full"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            return Ok(());
+        }
+
         let message = serde_json::to_value(&message)?;
         self.observers
             .send((
@@ -116,19 +286,20 @@ where
                 Messages::Channel(ChannelMessage::Message(self.name.clone(), message)),
             ))
             .map_err(|_| Error::SendMessageFailed)?;
-
         Ok(())
     }
 
+    /// Remove this channel and disconnect all subscribers.
     pub fn delete(&self) -> Result<(), Error> {
         let mut signals = use_context::<WsSignals>().ok_or(Error::MissingServerSignals)?;
         signals.delete_channel(&self.name)
     }
 }
 
-impl<T> private::DeleteTrait for ServerChannelSignal<T>
+impl<T, S> private::DeleteTrait for ServerChannelSignal<T, S>
 where
     T: Clone + Send + Sync + Serialize + for<'de> Deserialize<'de> + 'static,
+    S: Send + Sync + 'static,
 {
     fn delete(&self) -> Result<(), Error> {
         self.observers

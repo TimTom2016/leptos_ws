@@ -1,0 +1,68 @@
+[package]
+name = "axum_adv_example"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+axum = { version = "0.8.9", optional = true, features = ["macros"] }
+console_error_panic_hook = "0.1.7"
+console_log = "1"
+cfg-if = "1"
+futures = { version = "0.3.32", default-features = false, optional = true }
+leptos = { version = "0.8.20" }
+leptos_axum = { version = "0.8.10", optional = true }
+leptos_ws = { path = "../.." }
+log = "0.4.33"
+serde = { version = "1.0", features = ["derive"] }
+simple_logger = "5.2"
+tokio = { version = "1.52.3", features = [
+    "rt",
+    "macros",
+    "rt-multi-thread",
+], optional = true }
+tokio-stream = { version = "0.1.18", optional = true }
+tower = { version = "0.5.3", optional = true }
+tower-http = { version = "0.7", features = ["fs"], optional = true }
+wasm-bindgen = "=0.2.108"
+http = "1.0"
+dashmap = "6.2.1"
+
+[features]
+hydrate = ["leptos/hydrate","leptos_ws/hydrate"]
+ssr = [
+    "dep:axum",
+    "dep:futures",
+    "dep:tokio",
+    "dep:tokio-stream",
+    "dep:tower",
+    "dep:tower-http",
+    "dep:leptos_axum",
+    "leptos/ssr",
+    "leptos_ws/ssr",
+]
+
+[package.metadata.cargo-all-features]
+denylist = ["axum", "tokio", "tower", "tower-http", "leptos_axum"]
+skip_feature_sets = [["ssr", "hydrate"]]
+
+[package.metadata.leptos]
+output-name = "axum_adv_example"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+site-addr = "127.0.0.1:3000"
+reload-port = 3001
+end2end-cmd = "npx playwright test"
+end2end-dir = "end2end"
+browserquery = "defaults"
+watch = false
+env = "DEV"
+bin-features = ["ssr"]
+bin-default-features = false
+lib-features = ["hydrate"]
+lib-default-features = false
+
+[package.metadata.bin]
+cargo-leptos = { version = "0.2.29" }

@@ -121,7 +121,8 @@ where
     async fn update_if_changed(&self) -> Result<(), Error> {
         let json = self.json_value.read().await;
 
-        let new_json = serde_json::to_value(self.value.get())?;
+        let value = self.value.try_get().ok_or(Error::UpdateSignalFailed)?;
+        let new_json = serde_json::to_value(value)?;
         if *json == new_json {
             Err(Error::UpdateSignalFailed)
         } else {
