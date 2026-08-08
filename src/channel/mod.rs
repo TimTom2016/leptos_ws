@@ -63,18 +63,18 @@ pub type ChannelSignal<T, S = ()> = client::ClientChannelSignal<T, S>;
 /// and the per-connection state via [`state`](Self::state) (immutable) or
 /// [`state_mut`](Self::state_mut) (mutable).
 pub struct ChannelContext<'a, S = ()> {
-    client_id: String,
+    client_id: &'a str,
     state: &'a mut S,
 }
 
 impl<'a, S> ChannelContext<'a, S> {
-    pub fn new(client_id: String, state: &'a mut S) -> Self {
+    pub fn new(client_id: &'a str, state: &'a mut S) -> Self {
         Self { client_id, state }
     }
 
     /// Unique connection identifier assigned by the server.
     pub fn client_id(&self) -> &str {
-        &self.client_id
+        self.client_id
     }
 
     /// Immutable reference to the per-connection state.

@@ -1,6 +1,8 @@
 use super::ChannelContext;
 use crate::messages::{ChannelMessage, Messages};
-use crate::traits::{ChannelHandler, ChannelSignalTrait, SendMapperHandler, private};
+use crate::traits::{
+    ChannelHandler, ChannelSignalTrait, SendFilterHandler, SendMapperHandler, private,
+};
 use crate::{error::Error, ws_signals::WsSignals};
 use async_trait::async_trait;
 use leptos::prelude::*;
@@ -60,7 +62,7 @@ impl<T: Clone + Send + Sync + for<'de> Deserialize<'de> + 'static, S: Send + Syn
         {
             let mut state_lock = self.state.lock().unwrap();
             if let Some(ref mut state) = *state_lock {
-                let mut ctx = ChannelContext::new(client_id.to_owned(), state);
+                let mut ctx = ChannelContext::new(client_id, state);
                 callback.handle(&mut ctx, &message);
             }
         }
@@ -123,7 +125,12 @@ where
     pub fn on_server(&self, _callback: impl ChannelHandler<T, S>) {}
 
     /// Add a send mapper (no-op on client)
-    pub fn add_send_mapper<F>(&self, _mapper: impl SendMapperHandler<T, S>) -> Result<(), Error> {
+    pub fn add_send_mapper(&self, _mapper: impl SendMapperHandler<T, S>) -> Result<(), Error> {
+        Ok(())
+    }
+
+    /// Add a send filter (no-op on client)
+    pub fn add_send_filter(&self, _filter: impl SendFilterHandler<T, S>) -> Result<(), Error> {
         Ok(())
     }
 

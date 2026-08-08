@@ -409,12 +409,16 @@ pub async fn leptos_ws_websocket(
 
                     ChannelMessage::Message(name, value) => {
                         tracing::debug!(connection_id = %id, channel_name = %name, "client sent channel message");
+                        if !server_signals.has_channel_handler(&name) {
+                            continue;
+                        }
                         if let Some(channel_map) = server_signals.channel_connections.get(&name) {
                             let map = channel_map.value().clone();
                             drop(channel_map);
-                            if let Some((_, mut entry)) = map.remove(&id.to_string()) {
+                            let key = (*id).clone();
+                            if let Some((_, mut entry)) = map.remove(&key) {
                                 server_signals.handle_message(&name, &id, &mut *entry.state, value);
-                                map.insert(id.to_string(), entry);
+                                map.insert(key, entry);
                             }
                         }
                     }

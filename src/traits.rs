@@ -41,6 +41,11 @@ pub trait ChannelSignalTrait: private::DeleteTrait + Send + Sync + 'static {
     fn create_state(&self) -> Box<dyn Any + Send + Sync>;
 
     fn on_reconnect_message(&self) -> Result<Messages, Error>;
+
+    /// Whether a server-side message handler has been registered for this channel.
+    fn has_server_handler(&self) -> bool {
+        false
+    }
 }
 
 /// Trait for handling channel messages with mutable client context.
@@ -75,6 +80,25 @@ where
     F: Fn(&ChannelContext<'_, S>, &T) -> Option<T> + Send + Sync + 'static,
 {
     fn handle(&self, context: &ChannelContext<'_, S>, msg: &T) -> Option<T> {
+        self(context, msg)
+    }
+}
+
+/// Trait for send filters that suppress outgoing messages per-connection.
+///
+/// Unlike [`SendMapperHandler`], a filter cannot transform the message, allowing it
+/// to be serialized once and cloned per allowed connection.
+///
+/// Closures `Fn(&ChannelContext<'_, S>, &T) -> bool` implement this trait automatically.
+pub trait SendFilterHandler<T, S = ()>: Send + Sync + 'static {
+    fn allow(&self, context: &ChannelContext<'_, S>, msg: &T) -> bool;
+}
+
+impl<T, S, F> SendFilterHandler<T, S> for F
+where
+    F: Fn(&ChannelContext<'_, S>, &T) -> bool + Send + Sync + 'static,
+{
+    fn allow(&self, context: &ChannelContext<'_, S>, msg: &T) -> bool {
         self(context, msg)
     }
 }

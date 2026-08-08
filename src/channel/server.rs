@@ -4,7 +4,9 @@ use std::sync::{Arc, RwLock};
 use super::ChannelContext;
 use crate::error::Error;
 use crate::messages::{ChannelMessage, Messages};
-use crate::traits::{ChannelHandler, ChannelSignalTrait, SendMapperHandler, private};
+use crate::traits::{
+    ChannelHandler, ChannelSignalTrait, SendFilterHandler, SendMapperHandler, private,
+};
 use crate::ws_signals::{ConnEntry, WsSignals};
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -12,6 +14,8 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::broadcast::{Sender as BcSender, channel};
+
+const BROADCAST_CAPACITY: usize = 256;
 
 /// A signal owned by the server which writes to the websocket when mutated.
 pub struct ServerChannelSignal<T, S = ()>
@@ -22,6 +26,7 @@ where
     observers: Arc<BcSender<(Option<String>, Messages)>>,
     server_callback: Arc<RwLock<Option<Arc<dyn ChannelHandler<T, S>>>>>,
     send_mapper: Arc<RwLock<Option<Arc<dyn SendMapperHandler<T, S>>>>>,
+    send_filter: Arc<RwLock<Option<Arc<dyn SendFilterHandler<T, S>>>>>,
     connections: Arc<DashMap<String, Arc<DashMap<String, ConnEntry>>>>,
     state_factory: Arc<RwLock<Option<Arc<dyn Fn() -> S + Send + Sync>>>>,
 }
@@ -36,6 +41,7 @@ where
             observers: self.observers.clone(),
             server_callback: self.server_callback.clone(),
             send_mapper: self.send_mapper.clone(),
+            send_filter: self.send_filter.clone(),
             connections: self.connections.clone(),
             state_factory: self.state_factory.clone(),
         }
@@ -71,7 +77,7 @@ impl<
             let state: &mut S = state
                 .downcast_mut()
                 .expect("Connection state type mismatch");
-            let mut ctx = ChannelContext::new(client_id.to_owned(), state);
+            let mut ctx = ChannelContext::new(client_id, state);
             callback.handle(&mut ctx, &message);
         }
 
@@ -92,6 +98,12 @@ impl<
         Ok(Messages::Channel(ChannelMessage::Establish(
             self.name.clone(),
         )))
+    }
+
+    fn has_server_handler(&self) -> bool {
+        self.server_callback
+            .read()
+            .is_ok_and(|lock| lock.is_some())
     }
 }
 
@@ -119,12 +131,13 @@ where
         if let Some(signal) = signals.get_channel::<Self>(name) {
             return Ok(signal);
         }
-        let (send, _) = channel(256);
+        let (send, _) = channel(BROADCAST_CAPACITY);
         let new_signal = Self {
             name: name.to_owned(),
             observers: Arc::new(send),
             server_callback: Arc::new(RwLock::new(None)),
             send_mapper: Arc::new(RwLock::new(None)),
+            send_filter: Arc::new(RwLock::new(None)),
             connections: signals.channel_connections.clone(),
             state_factory: Arc::new(RwLock::new(None)),
         };
@@ -168,6 +181,16 @@ where
         Ok(())
     }
 
+    /// Register a per-connection send filter. Return `true` to deliver, `false` to suppress.
+    /// Applied before the mapper when both are registered.
+    pub fn add_send_filter(&self, filter: impl SendFilterHandler<T, S>) -> Result<(), Error> {
+        let Ok(mut lock) = self.send_filter.write() else {
+            return Err(Error::AddingChannelHandlerFailed);
+        };
+        *lock = Some(Arc::new(filter));
+        Ok(())
+    }
+
     /// Override the default per-connection state factory.
     ///
     /// By default, `S::default()` is used for each new connection. Use this to
@@ -185,52 +208,85 @@ where
 
     /// Send a message to all connected clients.
     ///
-    /// If a send mapper is registered, it is applied per-connection — the message
-    /// is only delivered to clients where the mapper returns `Some(...)`. Without a
-    /// mapper, the message is broadcast to all subscribed clients.
+    /// If a send filter or mapper is registered it is applied per-connection; otherwise
+    /// the message is broadcast to all subscribed clients.
     pub fn send_message(&self, message: T) -> Result<(), Error> {
-        if let Ok(lock) = self.send_mapper.read()
-            && let Some(mapper) = lock.as_ref()
-        {
-            let map = self.connections.get(&self.name).map(|r| r.value().clone());
-            let Some(map) = map else {
-                return Ok(());
-            };
+        let connections = || {
+            let map = self.connections.get(&self.name).map(|r| r.value().clone())?;
             let keys: Vec<String> = map.iter().map(|e| e.key().clone()).collect();
+            Some((map, keys))
+        };
 
-            for key in keys {
-                if let Some(mut entry) = map.get_mut(&key) {
-                    let conn_id = key.as_str();
-                    let s: &mut S = entry
-                        .state
-                        .downcast_mut()
-                        .expect("Connection state type mismatch");
-                    let ctx = ChannelContext::new(conn_id.to_owned(), s);
-                    if let Some(mapped) = mapper.handle(&ctx, &message) {
-                        let value = serde_json::to_value(&mapped)?;
-                        let msg =
-                            Messages::Channel(ChannelMessage::Message(self.name.clone(), value));
-                        if entry.sender.try_send(Ok(msg)).is_err() {
-                            tracing::warn!(
-                                connection_id = %conn_id,
-                                channel = %self.name,
-                                "dropping message: per-connection channel full"
-                            );
+        if let Ok(lock) = self.send_filter.read()
+            && let Some(filter) = lock.as_ref()
+        {
+            let value = serde_json::to_value(&message)?;
+            if let Some((map, keys)) = connections() {
+                for key in keys {
+                    if let Some(mut entry) = map.get_mut(&key) {
+                        let conn_id = key.as_str();
+                        let s: &mut S = entry
+                            .state
+                            .downcast_mut()
+                            .expect("Connection state type mismatch");
+                        let ctx = ChannelContext::new(conn_id, s);
+                        if filter.allow(&ctx, &message) {
+                            let msg = Messages::Channel(ChannelMessage::Message(
+                                self.name.clone(),
+                                value.clone(),
+                            ));
+                            if entry.sender.try_send(Ok(msg)).is_err() {
+                                tracing::warn!(
+                                    connection_id = %conn_id,
+                                    channel = %self.name,
+                                    "dropping message: per-connection channel full"
+                                );
+                            }
                         }
                     }
                 }
             }
-            Ok(())
-        } else {
-            let message = serde_json::to_value(&message)?;
-            self.observers
-                .send((
-                    None,
-                    Messages::Channel(ChannelMessage::Message(self.name.clone(), message)),
-                ))
-                .map_err(|_| Error::SendMessageFailed)?;
-            Ok(())
+            return Ok(());
         }
+
+        if let Ok(lock) = self.send_mapper.read()
+            && let Some(mapper) = lock.as_ref()
+        {
+            if let Some((map, keys)) = connections() {
+                for key in keys {
+                    if let Some(mut entry) = map.get_mut(&key) {
+                        let conn_id = key.as_str();
+                        let s: &mut S = entry
+                            .state
+                            .downcast_mut()
+                            .expect("Connection state type mismatch");
+                        let ctx = ChannelContext::new(conn_id, s);
+                        if let Some(mapped) = mapper.handle(&ctx, &message) {
+                            let value = serde_json::to_value(&mapped)?;
+                            let msg =
+                                Messages::Channel(ChannelMessage::Message(self.name.clone(), value));
+                            if entry.sender.try_send(Ok(msg)).is_err() {
+                                tracing::warn!(
+                                    connection_id = %conn_id,
+                                    channel = %self.name,
+                                    "dropping message: per-connection channel full"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            return Ok(());
+        }
+
+        let message = serde_json::to_value(&message)?;
+        self.observers
+            .send((
+                None,
+                Messages::Channel(ChannelMessage::Message(self.name.clone(), message)),
+            ))
+            .map_err(|_| Error::SendMessageFailed)?;
+        Ok(())
     }
 
     /// Remove this channel and disconnect all subscribers.

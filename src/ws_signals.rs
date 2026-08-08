@@ -161,6 +161,12 @@ impl WsSignals {
             .map(|v| v.handle_message(client_id, state, message))
     }
 
+    pub fn has_channel_handler(&self, name: &str) -> bool {
+        self.channels
+            .get(name)
+            .is_some_and(|v| v.has_server_handler())
+    }
+
     pub fn json(&self, name: &str) -> Option<Result<Value, Error>> {
         self.signals.get(name).map(|v| v.json())
     }

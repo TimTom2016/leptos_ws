@@ -58,16 +58,12 @@ pub fn App() -> impl IntoView {
         channel.on_server(SubscribeHandler).ok();
 
         channel
-            .add_send_mapper(
+            .add_send_filter(
                 move |ctx: &ChannelContext<'_, ConnectionState>, msg: &Messages| match msg {
                     Messages::Event { topic, content: _ } => {
-                        if ctx.state().interests.iter().any(|i| i == topic) {
-                            Some(msg.clone())
-                        } else {
-                            None
-                        }
+                        ctx.state().interests.iter().any(|i| i == topic)
                     }
-                    _ => None,
+                    _ => false,
                 },
             )
             .ok();
