@@ -53,6 +53,37 @@ mod server;
 /// When using `ChannelSignal`, ensure that you've set up the WebSocket connection
 /// using the `provide_websocket` function in your application's root component.
 #[cfg(feature = "ssr")]
-pub type ChannelSignal<T> = server::ServerChannelSignal<T>;
+pub type ChannelSignal<T, S = ()> = server::ServerChannelSignal<T, S>;
 #[cfg(all(any(feature = "csr", feature = "hydrate"), not(feature = "ssr")))]
-pub type ChannelSignal<T> = client::ClientChannelSignal<T>;
+pub type ChannelSignal<T, S = ()> = client::ClientChannelSignal<T, S>;
+
+/// Per-connection state wrapper passed to channel handlers and send mappers.
+///
+/// Provides access to the connection's unique ID via [`client_id`](Self::client_id)
+/// and the per-connection state via [`state`](Self::state) (immutable) or
+/// [`state_mut`](Self::state_mut) (mutable).
+pub struct ChannelContext<'a, S = ()> {
+    client_id: &'a str,
+    state: &'a mut S,
+}
+
+impl<'a, S> ChannelContext<'a, S> {
+    pub fn new(client_id: &'a str, state: &'a mut S) -> Self {
+        Self { client_id, state }
+    }
+
+    /// Unique connection identifier assigned by the server.
+    pub fn client_id(&self) -> &str {
+        self.client_id
+    }
+
+    /// Immutable reference to the per-connection state.
+    pub fn state(&self) -> &S {
+        self.state
+    }
+
+    /// Mutable reference to the per-connection state.
+    pub fn state_mut(&mut self) -> &mut S {
+        self.state
+    }
+}
