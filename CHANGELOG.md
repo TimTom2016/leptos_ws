@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+### Added
+- **Per-connection state**: `ChannelSignal<T, S>` now carries a per-connection state `S`, created via a factory (`with_state_factory`) and passed to handlers through `ChannelContext`, which also exposes the `client_id`.
+- **Send mapper**: `add_send_mapper` lets you transform or filter outgoing channel messages per-connection (`None` suppresses delivery for that client).
+- **Send filter**: `add_send_filter` lets you suppress outgoing channel messages per-connection. Serializes once instead of per connection, so prefer it over a mapper for pure filtering.
+- **`axum-adv` example**: Full example demonstrating per-connection state, send mappers, and server/client handlers.
+- `ChannelHandler` now accepts closures with any state type, not just `()`.
+
+### Fixed
+- Panic when reading a disposed signal in `update_if_changed` — now uses `try_get` and returns an error instead.
+- Deadlock when a channel message handler calls `send_message` (per-connection entries are now removed before handling and re-inserted afterwards).
+- Dropped channel messages are now logged instead of silently ignored.
+- Various import and documentation cleanups.
+
 ## [0.9.8] - 2026-06-16
 ### Added
 - Server-side tracing events for WebSocket connections, messages, and broadcasts (feature-gated behind `ssr`).
