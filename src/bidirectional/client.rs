@@ -2,7 +2,6 @@ use crate::messages::{BiDirectionalMessage, Messages, SignalUpdate};
 use crate::traits::{WsSignalCore, private};
 use crate::{error::Error, ws_signals::WsSignals};
 use async_trait::async_trait;
-use futures::executor::block_on;
 use json_patch::Patch;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -152,8 +151,9 @@ where
             lock.untrack();
         }
         drop(lock);
-        block_on(async move {
-            let _ = self.update_if_changed().await;
+        let this = self.clone();
+        leptos::task::spawn_local(async move {
+            let _ = this.update_if_changed().await;
         });
         Some(val)
     }
